@@ -328,27 +328,6 @@ GET /health
 }
 ```
 
-##### 10. Información de la Base de Datos
-```http
-GET /api/v1/database/info
-```
-
-**Descripción**: Obtiene información de la conexión a la base de datos
-
-**Respuesta:**
-```json
-{
-  "status": "success",
-  "data": {
-    "database": "crystodolar",
-    "user": "postgres",
-    "server_ip": "ep-cool-forest-123456.us-east-2.aws.neon.tech",
-    "postgres_version": "PostgreSQL 15.4",
-    "active_connections": 3
-  }
-}
-```
-
 ## 🛠️ Instalación y Configuración
 
 ### Requisitos del Sistema
