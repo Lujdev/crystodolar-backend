@@ -1,0 +1,50 @@
+# Entorno virtual
+.venv/
+env/
+venv/
+/venv/
+
+# Archivos de caché de Python
+__pycache__/
+*.pyc
+*.pyd
+*.pyo
+
+# Archivos de entorno (variables de entorno, secretos)
+.env
+.flaskenv
+*.env
+
+# Logs y bases de datos locales
+*.log
+*.sqlite
+*.db
+/data/  # Si tienes una carpeta para datos locales o bases de datos
+
+# Archivos de configuración de IDEs (opcionales pero recomendados)
+.idea/             # Para PyCharm
+.vscode/           # Para VS Code
+*.sublime-project
+*.sublime-workspace
+
+# Archivos de testing
+.pytest_cache/
+htmlcov/
+.coverage
+
+# Dependencias de paquetes
+/dist/
+/build/
+*.egg-info/
+.eggs/
+
+# Archivos de Jupyter (si aplica)
+.ipynb_checkpoints/
+
+# Archivos temporales del sistema operativo
+.DS_Store          # macOS
+Thumbs.db          # Windows
+
+# Archivos específicos de FastAPI/Uvicorn (si se generan)
+*.sqlite3          # Si usas SQLite
+.env
