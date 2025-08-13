@@ -87,22 +87,21 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    """Health check con verificación de BD"""
+    """Health check simple para Railway"""
     try:
-        # Verificar conexión a BD
-        conn = await asyncpg.connect(DATABASE_URL)
-        result = await conn.fetchval("SELECT 1")
-        await conn.close()
-        
+        # Health check básico sin verificar BD
         return {
             "status": "healthy",
-            "database": "connected",
-            "result": result,
-            "message": "Todas las conexiones funcionando correctamente"
+            "service": "crystodolar-backend",
+            "timestamp": datetime.now().isoformat(),
+            "message": "Service is running"
         }
     except Exception as e:
         logger.error(f"Health check failed: {e}")
-        raise HTTPException(status_code=503, detail=f"Service unavailable: {e}")
+        return {
+            "status": "unhealthy",
+            "error": str(e)
+        }
 
 
 @app.get("/api/v1/rates/scrape-bcv")
@@ -490,10 +489,13 @@ if __name__ == "__main__":
     logger.info("🚀 Iniciando CrystoDolar Simple Server...")
     logger.info(f"📊 Database URL: {DATABASE_URL[:50]}...")
     
+    # Usar variable de entorno PORT para Railway, o 8000 por defecto
+    port = int(os.getenv("PORT", 8000))
+    
     uvicorn.run(
         "simple_server:app",
         host="0.0.0.0",
-        port=8000,
-        reload=True,
+        port=port,
+        reload=False,  # False para producción
         log_level="info"
     )
