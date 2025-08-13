@@ -10,6 +10,20 @@ import uvicorn
 import os
 from datetime import datetime
 import sys
+import warnings
+import ssl
+
+# Importar servicios de base de datos
+try:
+    from app.services.database_service import DatabaseService
+    from app.core.database import get_db_session
+    DATABASE_AVAILABLE = True
+except ImportError:
+    print("⚠️ DatabaseService no disponible - funcionando sin persistencia")
+    DATABASE_AVAILABLE = False
+
+# Suprimir advertencias de SSL para Railway
+warnings.filterwarnings('ignore', message='Unverified HTTPS request')
 
 # Crear instancia de FastAPI
 app = FastAPI(
@@ -112,6 +126,7 @@ async def debug_bcv():
                 async with httpx.AsyncClient(
                     timeout=10.0,
                     follow_redirects=True,
+                    verify=False,  # Deshabilitar verificación SSL para Railway
                     headers={
                         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
                     }
@@ -145,6 +160,91 @@ async def debug_bcv():
             "timestamp": datetime.now().isoformat()
         }
 
+@app.get("/api/v1/debug/ssl-test")
+async def test_ssl_connection():
+    """Endpoint específico para probar conexiones SSL"""
+    try:
+        import httpx
+        
+        test_urls = [
+            {"url": "https://www.bcv.org.ve/", "description": "BCV HTTPS"},
+            {"url": "http://www.bcv.org.ve/", "description": "BCV HTTP"},
+            {"url": "https://httpbin.org/get", "description": "HTTPBin HTTPS (control)"}
+        ]
+        
+        results = []
+        
+        for test in test_urls:
+            try:
+                # Probar con SSL habilitado
+                try:
+                    async with httpx.AsyncClient(
+                        timeout=10.0,
+                        verify=True,  # SSL habilitado
+                        headers={"User-Agent": "Mozilla/5.0"}
+                    ) as client:
+                        response = await client.get(test["url"])
+                        results.append({
+                            "url": test["url"],
+                            "description": test["description"],
+                            "ssl_enabled": True,
+                            "status_code": response.status_code,
+                            "success": True,
+                            "error": None
+                        })
+                except Exception as ssl_error:
+                    # Si falla SSL, probar sin verificación
+                    try:
+                        async with httpx.AsyncClient(
+                            timeout=10.0,
+                            verify=False,  # SSL deshabilitado
+                            headers={"User-Agent": "Mozilla/5.0"}
+                        ) as client:
+                            response = await client.get(test["url"])
+                            results.append({
+                                "url": test["url"],
+                                "description": test["description"],
+                                "ssl_enabled": False,
+                                "status_code": response.status_code,
+                                "success": True,
+                                "error": f"SSL falló, pero funcionó sin verificación: {str(ssl_error)}"
+                            })
+                    except Exception as no_ssl_error:
+                        results.append({
+                            "url": test["url"],
+                            "description": test["description"],
+                            "ssl_enabled": False,
+                            "status_code": None,
+                            "success": False,
+                            "error": f"Falló incluso sin SSL: {str(no_ssl_error)}"
+                        })
+                        
+            except Exception as e:
+                results.append({
+                    "url": test["url"],
+                    "description": test["description"],
+                    "ssl_enabled": None,
+                    "status_code": None,
+                    "success": False,
+                    "error": str(e)
+                })
+        
+        return {
+            "status": "success",
+            "data": {
+                "ssl_test_results": results,
+                "timestamp": datetime.now().isoformat(),
+                "note": "SSL deshabilitado para Railway por problemas de certificados"
+            }
+        }
+        
+    except Exception as e:
+        return {
+            "status": "error",
+            "error": str(e),
+            "timestamp": datetime.now().isoformat()
+        }
+
 # ==========================================
 # Funciones de scraping simplificadas para Railway
 # ==========================================
@@ -155,19 +255,41 @@ async def scrape_bcv_simple():
         import httpx
         from bs4 import BeautifulSoup
         
-        # URL del BCV (usar HTTPS directamente)
-        url = "https://www.bcv.org.ve/"
+        # URLs a probar (HTTPS primero, luego HTTP como fallback)
+        urls_to_try = [
+            "https://www.bcv.org.ve/",
+            "http://www.bcv.org.ve/"
+        ]
         
-        # Configurar cliente con redirecciones y headers
-        async with httpx.AsyncClient(
-            timeout=30.0,
-            follow_redirects=True,
-            headers={
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        response = None
+        final_url = None
+        
+        # Intentar con HTTPS primero, luego HTTP
+        for url in urls_to_try:
+            try:
+                async with httpx.AsyncClient(
+                    timeout=30.0,
+                    follow_redirects=True,
+                    verify=False,  # Deshabilitar verificación SSL para Railway
+                    headers={
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+                    }
+                ) as client:
+                    response = await client.get(url)
+                    response.raise_for_status()
+                    final_url = url
+                    break
+            except Exception as e:
+                print(f"Error con {url}: {str(e)}")
+                continue
+        
+        if not response:
+            return {
+                "status": "error",
+                "error": "No se pudo conectar a ninguna URL del BCV",
+                "timestamp": datetime.now().isoformat(),
+                "urls_tried": urls_to_try
             }
-        ) as client:
-            response = await client.get(url)
-            response.raise_for_status()
             
         # Parsear HTML
         soup = BeautifulSoup(response.text, 'html.parser')
@@ -256,6 +378,18 @@ async def scrape_bcv_simple():
                     eur_ves = float(match.group(1).replace(',', '.'))
                     break
         
+        # Guardar en base de datos si está disponible
+        if DATABASE_AVAILABLE and usd_ves > 0:
+            try:
+                await DatabaseService.save_bcv_rates(usd_ves, eur_ves, {
+                    "source": "BCV",
+                    "url": final_url,
+                    "timestamp": datetime.now().isoformat()
+                })
+                print("💾 BCV rates guardados en base de datos")
+            except Exception as e:
+                print(f"⚠️ No se pudieron guardar BCV rates en BD: {e}")
+        
         return {
             "status": "success",
             "data": {
@@ -263,7 +397,7 @@ async def scrape_bcv_simple():
                 "eur_ves": eur_ves,
                 "timestamp": datetime.now().isoformat(),
                 "source": "BCV",
-                "url": url
+                "url": final_url
             }
         }
     except Exception as e:
@@ -282,15 +416,25 @@ async def fetch_binance_p2p_simple():
         # URL de la API de Binance P2P
         url = "https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search"
         
-        # Parámetros para USDT/VES - VENDER USDT por VES
+        # Payload para la consulta (Compras USDT con Bolivares)
         params = {
+            "fiat": "VES",
             "page": 1,
             "rows": 10,
-            "payTypes": [],
+            "transAmount": 500,
+            "tradeType": "BUY",  # Compras USDT por Bs
             "asset": "USDT",
-            "tradeType": "BUY",  # BUY significa que el usuario COMPRA USDT con VES
-            "fiat": "VES",
-            "publisherType": None
+            "countries": [],
+            "proMerchantAds": False,
+            "shieldMerchantAds": False,
+            "filterType": "all",
+            "periods": [],
+            "additionalKycVerifyFilter": 0,
+            "publisherType": "merchant",
+            "payTypes": ["PagoMovil"],
+            "classifies": ["mass", "profession", "fiat_trade"],
+            "tradedWith": False,
+            "followed": False
         }
         
         # Configurar cliente con headers más realistas
@@ -342,19 +486,288 @@ async def fetch_binance_p2p_simple():
                     "user_type": "merchant" if best_ad.get("userType") == 1 else "user"
                 }
                 
+                # Preparar datos para guardar en BD
+                binance_data = {
+                    "usdt_ves_buy": best_price,  # Precio para COMPRAR USDT con VES
+                    "usdt_ves_avg": avg_price,
+                    "volume_24h": volume_24h,
+                    "best_ad": best_ad_info,
+                    "total_ads": len(data["data"]),
+                    "timestamp": datetime.now().isoformat(),
+                    "source": "binance_p2p",
+                    "api_method": "official_api",
+                    "trade_type": "buy_usdt"
+                }
+                
+                # Guardar en base de datos si está disponible
+                if DATABASE_AVAILABLE:
+                    try:
+                        await DatabaseService.save_binance_p2p_rates(binance_data)
+                        print("💾 Binance P2P rates guardados en base de datos")
+                    except Exception as e:
+                        print(f"⚠️ No se pudieron guardar Binance P2P rates en BD: {e}")
+                
                 return {
                     "status": "success",
-                    "data": {
-                        "usdt_ves_buy": best_price,
-                        "usdt_ves_avg": avg_price,
-                        "volume_24h": volume_24h,
-                        "best_ad": best_ad_info,
-                        "total_ads": len(data["data"]),
-                        "timestamp": datetime.now().isoformat(),
-                        "source": "binance_p2p",
-                        "api_method": "official_api",
-                        "trade_type": "sell_usdt"
-                    }
+                    "data": binance_data
+                }
+            except (ValueError, KeyError, IndexError) as e:
+                return {
+                    "status": "error",
+                    "error": f"Error procesando datos de Binance: {str(e)}",
+                    "timestamp": datetime.now().isoformat(),
+                    "raw_data": str(data)[:200] + "..." if len(str(data)) > 200 else str(data)
+                }
+        else:
+            return {
+                "status": "error",
+                "error": "No se pudieron obtener datos de Binance",
+                "timestamp": datetime.now().isoformat(),
+                "response_status": data.get("success", False),
+                "data_count": len(data.get("data", []))
+            }
+            
+    except Exception as e:
+        return {
+            "status": "error",
+            "error": str(e),
+            "timestamp": datetime.now().isoformat(),
+            "url": url
+        }
+
+# ==========================================
+# Funciones auxiliares para Binance P2P (sin guardar en BD)
+# ==========================================
+
+async def _fetch_binance_p2p_rates_no_save():
+    """Obtener precios de venta (SELL en Binance = vender USDT por VES) - SIN guardar en BD"""
+    try:
+        import httpx
+        
+        # URL de la API de Binance P2P
+        url = "https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search"
+        
+        # Payload para la consulta (Vendes USDT por Bolivares)
+        params = {
+            "fiat": "VES",
+            "page": 1,
+            "rows": 10,
+            "transAmount": 500,
+            "tradeType": "SELL",  # Vendes USDT a Bs
+            "asset": "USDT",
+            "countries": [],
+            "proMerchantAds": False,
+            "shieldMerchantAds": False,
+            "filterType": "all",
+            "periods": [],
+            "additionalKycVerifyFilter": 0,
+            "publisherType": "merchant",
+            "payTypes": ["PagoMovil"],
+            "classifies": ["mass", "profession", "fiat_trade"],
+            "tradedWith": False,
+            "followed": False
+        }
+        
+        # Configurar cliente con headers más realistas
+        async with httpx.AsyncClient(
+            timeout=30.0,
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+                "Accept": "application/json, text/plain, */*",
+                "Accept-Language": "en-US,en;q=0.9",
+                "Content-Type": "application/json"
+            }
+        ) as client:
+            response = await client.post(url, json=params)
+            response.raise_for_status()
+            
+        data = response.json()
+        
+        if data.get("success") and data.get("data") and len(data["data"]) > 0:
+            try:
+                # Obtener el mejor anuncio
+                best_ad = data["data"][0]["adv"]
+                best_price = float(best_ad["price"])
+                
+                # Calcular precio promedio de los primeros 5 anuncios
+                prices = []
+                volumes = []
+                for adv in data["data"][:5]:
+                    try:
+                        price = float(adv["adv"]["price"])
+                        prices.append(price)
+                        
+                        min_amount = float(adv["adv"]["minSingleTransAmount"])
+                        max_amount = float(adv["adv"]["maxSingleTransAmount"])
+                        avg_amount = (min_amount + max_amount) / 2
+                        volumes.append(avg_amount)
+                    except (ValueError, KeyError):
+                        continue
+                
+                avg_price = sum(prices) / len(prices) if prices else best_price
+                volume_24h = sum(volumes) if volumes else 0
+                
+                # Información del mejor anuncio
+                best_ad_info = {
+                    "price": best_price,
+                    "min_amount": float(best_ad.get("minSingleTransAmount", 0)),
+                    "max_amount": float(best_ad.get("maxSingleTransAmount", 0)),
+                    "merchant": best_ad.get("fiatSymbol", "Unknown"),
+                    "pay_types": best_ad.get("payTypes", []),
+                    "user_type": "merchant" if best_ad.get("userType") == 1 else "user"
+                }
+                
+                # Preparar datos para guardar en BD
+                binance_data = {
+                    "usdt_ves_buy": best_price,  # Precio más bajo para vender USDT
+                    "usdt_ves_avg": avg_price,
+                    "volume_24h": volume_24h,
+                    "best_ad": best_ad_info,
+                    "total_ads": len(data["data"]),
+                    "timestamp": datetime.now().isoformat(),
+                    "source": "binance_p2p",
+                    "api_method": "official_api",
+                    "trade_type": "sell_usdt"
+                }
+                
+                # Guardar en base de datos si está disponible
+                if DATABASE_AVAILABLE:
+                    try:
+                        await DatabaseService.save_binance_p2p_rates(binance_data)
+                        print("💾 Binance P2P rates (sell) guardados en base de datos")
+                    except Exception as e:
+                        print(f"⚠️ No se pudieron guardar Binance P2P rates (sell) en BD: {e}")
+                
+                return {
+                    "status": "success",
+                    "data": binance_data
+                }
+            except (ValueError, KeyError, IndexError) as e:
+                return {
+                    "status": "error",
+                    "error": f"Error procesando datos de Binance: {str(e)}",
+                    "timestamp": datetime.now().isoformat(),
+                    "raw_data": str(data)[:200] + "..." if len(str(data)) > 200 else str(data)
+                }
+        else:
+            return {
+                "status": "error",
+                "error": "No se pudieron obtener datos de Binance",
+                "timestamp": datetime.now().isoformat(),
+                "response_status": data.get("success", False),
+                "data_count": len(data.get("data", []))
+            }
+            
+    except Exception as e:
+        return {
+            "status": "error",
+            "error": str(e),
+            "timestamp": datetime.now().isoformat(),
+            "url": url
+        }
+
+async def _fetch_binance_p2p_sell_rates_no_save():
+    """Obtener precios de compra (BUY en Binance = comprar USDT con VES) - SIN guardar en BD"""
+    try:
+        import httpx
+        
+        # URL de la API de Binance P2P
+        url = "https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search"
+        
+        # Payload para la consulta (Compras USDT con Bolivares)
+        params = {
+            "fiat": "VES",
+            "page": 1,
+            "rows": 10,
+            "transAmount": 500,
+            "tradeType": "BUY",  # Compras USDT por Bs
+            "asset": "USDT",
+            "countries": [],
+            "proMerchantAds": False,
+            "shieldMerchantAds": False,
+            "filterType": "all",
+            "periods": [],
+            "additionalKycVerifyFilter": 0,
+            "publisherType": "merchant",
+            "payTypes": ["PagoMovil"],
+            "classifies": ["mass", "profession", "fiat_trade"],
+            "tradedWith": False,
+            "followed": False
+        }
+        
+        # Configurar cliente con headers más realistas
+        async with httpx.AsyncClient(
+            timeout=30.0,
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+                "Accept": "application/json, text/plain, */*",
+                "Accept-Language": "en-US,en;q=0.9",
+                "Content-Type": "application/json"
+            }
+        ) as client:
+            response = await client.post(url, json=params)
+            response.raise_for_status()
+            
+        data = response.json()
+        
+        if data.get("success") and data.get("data") and len(data["data"]) > 0:
+            try:
+                # Obtener el mejor anuncio
+                best_ad = data["data"][0]["adv"]
+                best_price = float(best_ad["price"])
+                
+                # Calcular precio promedio de los primeros 5 anuncios
+                prices = []
+                volumes = []
+                for adv in data["data"][:5]:
+                    try:
+                        price = float(adv["adv"]["price"])
+                        prices.append(price)
+                        
+                        min_amount = float(adv["adv"]["minSingleTransAmount"])
+                        max_amount = float(adv["adv"]["maxSingleTransAmount"])
+                        avg_amount = (min_amount + max_amount) / 2
+                        volumes.append(avg_amount)
+                    except (ValueError, KeyError):
+                        continue
+                
+                avg_price = sum(prices) / len(prices) if prices else best_price
+                volume_24h = sum(volumes) if volumes else 0
+                
+                # Información del mejor anuncio
+                best_ad_info = {
+                    "price": best_price,
+                    "min_amount": float(best_ad.get("minSingleTransAmount", 0)),
+                    "max_amount": float(best_ad.get("maxSingleTransAmount", 0)),
+                    "merchant": best_ad.get("fiatSymbol", "Unknown"),
+                    "pay_types": best_ad.get("payTypes", []),
+                    "user_type": "merchant" if best_ad.get("userType") == 1 else "user"
+                }
+                
+                # Preparar datos para guardar en BD
+                binance_data = {
+                    "usdt_ves_sell": best_price,  # Precio más alto para comprar USDT
+                    "usdt_ves_avg": avg_price,
+                    "volume_24h": volume_24h,
+                    "best_ad": best_ad_info,
+                    "total_ads": len(data["data"]),
+                    "timestamp": datetime.now().isoformat(),
+                    "source": "binance_p2p",
+                    "api_method": "official_api",
+                    "trade_type": "buy_usdt"
+                }
+                
+                # Guardar en base de datos si está disponible
+                if DATABASE_AVAILABLE:
+                    try:
+                        await DatabaseService.save_binance_p2p_rates(binance_data)
+                        print("💾 Binance P2P rates (buy) guardados en base de datos")
+                    except Exception as e:
+                        print(f"⚠️ No se pudieron guardar Binance P2P rates (buy) en BD: {e}")
+                
+                return {
+                    "status": "success",
+                    "data": binance_data
                 }
             except (ValueError, KeyError, IndexError) as e:
                 return {
@@ -386,109 +799,7 @@ async def fetch_binance_p2p_simple():
 
 async def fetch_binance_p2p_sell_simple():
     """Consulta a Binance P2P para comprar USDT con VES (vender USDT)"""
-    try:
-        import httpx
-        
-        # URL de la API de Binance P2P
-        url = "https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search"
-        
-        # Parámetros para USDT/VES - COMPRAR USDT con VES
-        params = {
-            "page": 1,
-            "rows": 10,
-            "payTypes": [],
-            "asset": "USDT",
-            "tradeType": "SELL",  # SELL significa que el usuario VENDE USDT por VES
-            "fiat": "VES",
-            "publisherType": None
-        }
-        
-        # Configurar cliente con headers más realistas
-        async with httpx.AsyncClient(
-            timeout=30.0,
-            headers={
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
-                "Accept": "application/json, text/plain, */*",
-                "Accept-Language": "en-US,en;q=0.9",
-                "Content-Type": "application/json"
-            }
-        ) as client:
-            response = await client.post(url, json=params)
-            response.raise_for_status()
-            
-        data = response.json()
-        
-        if data.get("success") and data.get("data") and len(data["data"]) > 0:
-            try:
-                # Obtener el mejor anuncio
-                best_ad = data["data"][0]["adv"]
-                best_price = float(best_ad["price"])
-                
-                # Calcular precio promedio de los primeros 5 anuncios
-                prices = []
-                volumes = []
-                for adv in data["data"][:5]:
-                    try:
-                        price = float(adv["adv"]["price"])
-                        prices.append(price)
-                        
-                        min_amount = float(adv["adv"]["minSingleTransAmount"])
-                        max_amount = float(adv["adv"]["maxSingleTransAmount"])
-                        avg_amount = (min_amount + max_amount) / 2
-                        volumes.append(avg_amount)
-                    except (ValueError, KeyError):
-                        continue
-                
-                avg_price = sum(prices) / len(prices) if prices else best_price
-                volume_24h = sum(volumes) if volumes else 0
-                
-                # Información del mejor anuncio
-                best_ad_info = {
-                    "price": best_price,
-                    "min_amount": float(best_ad.get("minSingleTransAmount", 0)),
-                    "max_amount": float(best_ad.get("maxSingleTransAmount", 0)),
-                    "merchant": best_ad.get("fiatSymbol", "Unknown"),
-                    "pay_types": best_ad.get("payTypes", []),
-                    "user_type": "merchant" if best_ad.get("userType") == 1 else "user"
-                }
-                
-                return {
-                    "status": "success",
-                    "data": {
-                        "usdt_ves_sell": best_price,
-                        "usdt_ves_avg": avg_price,
-                        "volume_24h": volume_24h,
-                        "best_ad": best_ad_info,
-                        "total_ads": len(data["data"]),
-                        "timestamp": datetime.now().isoformat(),
-                        "source": "binance_p2p",
-                        "api_method": "official_api",
-                        "trade_type": "buy_usdt"
-                    }
-                }
-            except (ValueError, KeyError, IndexError) as e:
-                return {
-                    "status": "error",
-                    "error": f"Error procesando datos de Binance: {str(e)}",
-                    "timestamp": datetime.now().isoformat(),
-                    "raw_data": str(data)[:200] + "..." if len(str(data)) > 200 else str(data)
-                }
-        else:
-            return {
-                "status": "error",
-                "error": "No se pudieron obtener datos de Binance",
-                "timestamp": datetime.now().isoformat(),
-                "response_status": data.get("success", False),
-                "data_count": len(data.get("data", []))
-            }
-            
-    except Exception as e:
-        return {
-            "status": "error",
-            "error": str(e),
-            "timestamp": datetime.now().isoformat(),
-            "url": url
-        }
+    return await _fetch_binance_p2p_sell_rates_no_save()
 
 # ==========================================
 # Servicios y lógica compleja integrada
@@ -662,6 +973,22 @@ async def get_current_rates(
     - **exchange_code**: Filtrar por exchange (bcv, binance_p2p)
     - **currency_pair**: Filtrar por par de monedas
     """
+    # Si no hay filtros, intentar obtener desde BD primero
+    if not exchange_code and not currency_pair and DATABASE_AVAILABLE:
+        try:
+            db_rates = await DatabaseService.get_current_rates()
+            if db_rates:
+                return {
+                    "status": "success",
+                    "data": db_rates,
+                    "count": len(db_rates),
+                    "source": "database",
+                    "timestamp": datetime.now().isoformat()
+                }
+        except Exception as e:
+            print(f"⚠️ Error obteniendo rates desde BD: {e}")
+    
+    # Si no hay BD o no hay datos, obtener en tiempo real
     try:
         rates = await rates_service.get_current_rates(
             exchange_code=exchange_code,
@@ -671,6 +998,7 @@ async def get_current_rates(
             "status": "success",
             "data": rates,
             "count": len(rates),
+            "source": "realtime",
             "timestamp": datetime.now().isoformat()
         }
     except Exception as e:
@@ -682,15 +1010,35 @@ async def get_current_rates(
 
 @app.get("/api/v1/rates/history")
 async def get_all_rate_history(limit: int = 100):
-    """Obtener histórico general (placeholder para Railway)"""
-    return {
-        "status": "success",
-        "message": "Endpoint en desarrollo para Railway",
-        "data": [],
-        "count": 0,
-        "limit": limit,
-        "timestamp": datetime.now().isoformat()
-    }
+    """Obtener histórico general desde la base de datos"""
+    if not DATABASE_AVAILABLE:
+        return {
+            "status": "error",
+            "message": "Base de datos no disponible en Railway",
+            "data": [],
+            "count": 0,
+            "limit": limit,
+            "timestamp": datetime.now().isoformat()
+        }
+    
+    try:
+        rates = await DatabaseService.get_latest_rates(limit)
+        return {
+            "status": "success",
+            "data": rates,
+            "count": len(rates),
+            "limit": limit,
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "error": f"Error obteniendo histórico: {str(e)}",
+            "data": [],
+            "count": 0,
+            "limit": limit,
+            "timestamp": datetime.now().isoformat()
+        }
 
 @app.get("/api/v1/rates/summary")
 async def get_market_summary():
@@ -774,67 +1122,83 @@ async def get_binance_rate():
 @app.get("/api/v1/rates/binance-p2p/complete")
 async def get_binance_p2p_complete():
     """
-    Análisis Completo de Binance P2P
-    
-    Descripción: Obtiene precios de compra y venta con análisis de spread y liquidez
+    Obtener tanto precios de compra como de venta de USDT/VES en Binance P2P
     """
     try:
-        # Obtener datos de compra y venta
-        buy_data = await fetch_binance_p2p_simple()
-        sell_data = await fetch_binance_p2p_sell_simple()
+        print("🟡 Obteniendo precios completos de Binance P2P...")
         
-        if buy_data["status"] == "success" and sell_data["status"] == "success":
-            buy_price = buy_data["data"]["usdt_ves_buy"]
-            sell_price = sell_data["data"]["usdt_ves_sell"]
+        # Obtener precios de venta (SELL en Binance = vender USDT por VES)
+        # IMPORTANTE: NO guardar en BD, solo obtener datos
+        sell_result = await _fetch_binance_p2p_rates_no_save()
+        
+        # Obtener precios de compra (BUY en Binance = comprar USDT con VES)
+        # IMPORTANTE: NO guardar en BD, solo obtener datos
+        buy_result = await _fetch_binance_p2p_sell_rates_no_save()
+        
+        if buy_result["status"] == "success" and sell_result["status"] == "success":
+            buy_data = buy_result["data"]
+            sell_data = sell_result["data"]
             
-            # Calcular spread interno
-            spread_internal = sell_price - buy_price
-            spread_percentage = (spread_internal / buy_price) * 100 if buy_price > 0 else 0
+            # CORREGIR: Asignar precios correctamente
+            # buy_price = precio para COMPRAR USDT (más alto)
+            # sell_price = precio para VENDER USDT (más bajo)
+            buy_price = buy_data["usdt_ves_sell"]  # Precio más alto para comprar USDT
+            sell_price = sell_data["usdt_ves_buy"]  # Precio más bajo para vender USDT
             
-            # Calcular volumen total
-            total_volume = buy_data["data"]["volume_24h"] + sell_data["data"]["volume_24h"]
+            # Calcular spread interno de Binance P2P
+            spread_internal = buy_price - sell_price
+            spread_percentage = (spread_internal / sell_price) * 100 if sell_price > 0 else 0
             
-            # Determinar liquidez
-            liquidity_score = "high" if total_volume > 1000 else "medium" if total_volume > 500 else "low"
-            
-            return {
-                "status": "success",
-                "data": {
-                    "buy_usdt": {
-                        "price": buy_price,
-                        "avg_price": buy_data["data"]["usdt_ves_avg"],
-                        "best_ad": buy_data["data"]["best_ad"],
-                        "total_ads": buy_data["data"]["total_ads"]
-                    },
-                    "sell_usdt": {
-                        "price": sell_price,
-                        "avg_price": sell_data["data"]["usdt_ves_avg"],
-                        "best_ad": sell_data["data"]["best_ad"],
-                        "total_ads": sell_data["data"]["total_ads"]
-                    },
-                    "market_analysis": {
-                        "spread_internal": round(spread_internal, 4),
-                        "spread_percentage": round(spread_percentage, 2),
-                        "volume_24h": total_volume,
-                        "liquidity_score": liquidity_score
-                    },
-                    "timestamp": datetime.now().isoformat(),
-                    "source": "binance_p2p",
-                    "api_method": "official_api"
-                }
+            complete_result = {
+                "buy_usdt": {
+                    "price": buy_price,  # Precio para COMPRAR USDT
+                    "avg_price": buy_data["usdt_ves_avg"],
+                    "best_ad": buy_data["best_ad"],
+                    "total_ads": buy_data["total_ads"]
+                },
+                "sell_usdt": {
+                    "price": sell_price,  # Precio para VENDER USDT
+                    "avg_price": sell_data["usdt_ves_avg"],
+                    "best_ad": sell_data["best_ad"],
+                    "total_ads": sell_data["total_ads"]
+                },
+                "market_analysis": {
+                    "spread_internal": round(spread_internal, 4),
+                    "spread_percentage": round(spread_percentage, 2),
+                    "volume_24h": round(buy_data["volume_24h"] + sell_data["volume_24h"], 2),
+                    "liquidity_score": "high" if spread_percentage < 2 else "medium" if spread_percentage < 5 else "low"
+                },
+                "timestamp": datetime.now().isoformat(),
+                "source": "binance_p2p",
+                "api_method": "official_api"
             }
+            
+            print(f"✅ Binance P2P completo obtenido: Buy={buy_price} (comprar USDT), Sell={sell_price} (vender USDT)")
+            
+            # IMPORTANTE: Solo guardar UNA vez usando el método específico para datos completos
+            # NO guardar usando las funciones individuales para evitar duplicados
+            try:
+                if DATABASE_AVAILABLE:
+                    await DatabaseService.save_binance_p2p_complete_rates(complete_result)
+                    print("💾 Binance P2P COMPLETE rates guardados en base de datos (UNA SOLA LÍNEA)")
+                else:
+                    print("💾 Binance P2P COMPLETE rates obtenidos (sin BD en Railway)")
+            except Exception as e:
+                print(f"⚠️ No se pudieron guardar Binance P2P COMPLETE rates en BD: {e}")
+            
+            return {"status": "success", "data": complete_result}
         else:
-            return {
-                "status": "error",
-                "error": "No se pudieron obtener todos los datos de Binance P2P",
-                "timestamp": datetime.now().isoformat()
-            }
+            errors = []
+            if buy_result["status"] != "success":
+                errors.append(f"Compra: {buy_result.get('error', 'Error desconocido')}")
+            if sell_result["status"] != "success":
+                errors.append(f"Venta: {sell_result.get('error', 'Error desconocido')}")
+            
+            raise Exception(f"Error obteniendo datos completos: {'; '.join(errors)}")
+            
     except Exception as e:
-        return {
-            "status": "error",
-            "error": str(e),
-            "timestamp": datetime.now().isoformat()
-        }
+        print(f"❌ Error obteniendo datos completos de Binance P2P: {e}")
+        return {"status": "error", "error": str(e)}
 
 @app.get("/api/v1/rates/scrape-bcv")
 async def scrape_bcv_live():
