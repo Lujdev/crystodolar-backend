@@ -91,6 +91,83 @@ async def get_config():
         }
     }
 
+# ==========================================
+# API Endpoints para Railway
+# ==========================================
+
+@app.get("/api/v1/rates/current")
+async def get_current_rates():
+    """Obtener cotizaciones actuales (placeholder para Railway)"""
+    return {
+        "status": "success",
+        "message": "Endpoint en desarrollo para Railway",
+        "data": [],
+        "count": 0,
+        "timestamp": datetime.now().isoformat()
+    }
+
+@app.get("/api/v1/rates/history")
+async def get_all_rate_history(limit: int = 100):
+    """Obtener histórico general (placeholder para Railway)"""
+    return {
+        "status": "success",
+        "message": "Endpoint en desarrollo para Railway",
+        "data": [],
+        "count": 0,
+        "limit": limit,
+        "timestamp": datetime.now().isoformat()
+    }
+
+@app.get("/api/v1/rates/binance-p2p")
+async def get_binance_p2p_rates():
+    """Cotizaciones Binance P2P (placeholder para Railway)"""
+    return {
+        "status": "success",
+        "message": "Endpoint en desarrollo para Railway",
+        "data": {
+            "usdt_ves_buy": 0,
+            "usdt_ves_sell": 0,
+            "volume_24h": 0,
+            "timestamp": datetime.now().isoformat()
+        }
+    }
+
+@app.get("/api/v1/rates/binance-p2p/complete")
+async def get_binance_p2p_complete():
+    """Cotizaciones completas Binance P2P (placeholder para Railway)"""
+    return {
+        "status": "success",
+        "message": "Endpoint en desarrollo para Railway",
+        "data": {
+            "buy": {"price": 0, "volume": 0},
+            "sell": {"price": 0, "volume": 0},
+            "timestamp": datetime.now().isoformat()
+        }
+    }
+
+@app.get("/api/v1/rates/scrape-bcv")
+async def scrape_bcv_live():
+    """Scraping BCV (placeholder para Railway)"""
+    return {
+        "status": "success",
+        "message": "Endpoint en desarrollo para Railway",
+        "data": {
+            "usd_ves": 0,
+            "eur_ves": 0,
+            "timestamp": datetime.now().isoformat()
+        }
+    }
+
+@app.get("/api/v1/exchanges")
+async def get_exchanges():
+    """Lista de exchanges (placeholder para Railway)"""
+    return {
+        "status": "success",
+        "message": "Endpoint en desarrollo para Railway",
+        "data": [],
+        "count": 0
+    }
+
 if __name__ == "__main__":
     """Ejecutar servidor"""
     print("🚀 Iniciando CrystoDolar Simple Server para Railway...")
