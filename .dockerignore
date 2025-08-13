@@ -63,5 +63,11 @@ README.md
 *.md
 # Keep simple_server.py for deployment
 !simple_server.py
-# Exclude development requirements
+# Exclude development and test files
 requirements-dev.txt
+test_*.py
+test_*.ps1
+generate_*.py
+start.py
+Procfile
+RAILWAY_ENV_SETUP.md
