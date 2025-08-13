@@ -275,20 +275,20 @@ async def scrape_bcv_simple():
         }
 
 async def fetch_binance_p2p_simple():
-    """Consulta simplificada a Binance P2P sin dependencias complejas"""
+    """Consulta a Binance P2P para vender USDT por VES (comprar USDT)"""
     try:
         import httpx
         
         # URL de la API de Binance P2P
         url = "https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search"
         
-        # Parámetros para USDT/VES
+        # Parámetros para USDT/VES - VENDER USDT por VES
         params = {
             "page": 1,
             "rows": 10,
             "payTypes": [],
             "asset": "USDT",
-            "tradeType": "BUY",
+            "tradeType": "BUY",  # BUY significa que el usuario COMPRA USDT con VES
             "fiat": "VES",
             "publisherType": None
         }
@@ -310,13 +310,18 @@ async def fetch_binance_p2p_simple():
         
         if data.get("success") and data.get("data") and len(data["data"]) > 0:
             try:
-                # Obtener el mejor precio
-                best_price = float(data["data"][0]["adv"]["price"])
+                # Obtener el mejor anuncio
+                best_ad = data["data"][0]["adv"]
+                best_price = float(best_ad["price"])
                 
-                # Calcular volumen promedio de los primeros 5 anuncios
+                # Calcular precio promedio de los primeros 5 anuncios
+                prices = []
                 volumes = []
                 for adv in data["data"][:5]:
                     try:
+                        price = float(adv["adv"]["price"])
+                        prices.append(price)
+                        
                         min_amount = float(adv["adv"]["minSingleTransAmount"])
                         max_amount = float(adv["adv"]["maxSingleTransAmount"])
                         avg_amount = (min_amount + max_amount) / 2
@@ -324,17 +329,141 @@ async def fetch_binance_p2p_simple():
                     except (ValueError, KeyError):
                         continue
                 
+                avg_price = sum(prices) / len(prices) if prices else best_price
                 volume_24h = sum(volumes) if volumes else 0
+                
+                # Información del mejor anuncio
+                best_ad_info = {
+                    "price": best_price,
+                    "min_amount": float(best_ad.get("minSingleTransAmount", 0)),
+                    "max_amount": float(best_ad.get("maxSingleTransAmount", 0)),
+                    "merchant": best_ad.get("fiatSymbol", "Unknown"),
+                    "pay_types": best_ad.get("payTypes", []),
+                    "user_type": "merchant" if best_ad.get("userType") == 1 else "user"
+                }
                 
                 return {
                     "status": "success",
                     "data": {
                         "usdt_ves_buy": best_price,
-                        "usdt_ves_avg": best_price,
+                        "usdt_ves_avg": avg_price,
                         "volume_24h": volume_24h,
+                        "best_ad": best_ad_info,
+                        "total_ads": len(data["data"]),
                         "timestamp": datetime.now().isoformat(),
-                        "source": "Binance P2P",
-                        "announcements_count": len(data["data"])
+                        "source": "binance_p2p",
+                        "api_method": "official_api",
+                        "trade_type": "sell_usdt"
+                    }
+                }
+            except (ValueError, KeyError, IndexError) as e:
+                return {
+                    "status": "error",
+                    "error": f"Error procesando datos de Binance: {str(e)}",
+                    "timestamp": datetime.now().isoformat(),
+                    "raw_data": str(data)[:200] + "..." if len(str(data)) > 200 else str(data)
+                }
+        else:
+            return {
+                "status": "error",
+                "error": "No se pudieron obtener datos de Binance",
+                "timestamp": datetime.now().isoformat(),
+                "response_status": data.get("success", False),
+                "data_count": len(data.get("data", []))
+            }
+            
+    except Exception as e:
+        return {
+            "status": "error",
+            "error": str(e),
+            "timestamp": datetime.now().isoformat(),
+            "url": url
+        }
+
+# ==========================================
+# Funciones adicionales para Binance P2P
+# ==========================================
+
+async def fetch_binance_p2p_sell_simple():
+    """Consulta a Binance P2P para comprar USDT con VES (vender USDT)"""
+    try:
+        import httpx
+        
+        # URL de la API de Binance P2P
+        url = "https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search"
+        
+        # Parámetros para USDT/VES - COMPRAR USDT con VES
+        params = {
+            "page": 1,
+            "rows": 10,
+            "payTypes": [],
+            "asset": "USDT",
+            "tradeType": "SELL",  # SELL significa que el usuario VENDE USDT por VES
+            "fiat": "VES",
+            "publisherType": None
+        }
+        
+        # Configurar cliente con headers más realistas
+        async with httpx.AsyncClient(
+            timeout=30.0,
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+                "Accept": "application/json, text/plain, */*",
+                "Accept-Language": "en-US,en;q=0.9",
+                "Content-Type": "application/json"
+            }
+        ) as client:
+            response = await client.post(url, json=params)
+            response.raise_for_status()
+            
+        data = response.json()
+        
+        if data.get("success") and data.get("data") and len(data["data"]) > 0:
+            try:
+                # Obtener el mejor anuncio
+                best_ad = data["data"][0]["adv"]
+                best_price = float(best_ad["price"])
+                
+                # Calcular precio promedio de los primeros 5 anuncios
+                prices = []
+                volumes = []
+                for adv in data["data"][:5]:
+                    try:
+                        price = float(adv["adv"]["price"])
+                        prices.append(price)
+                        
+                        min_amount = float(adv["adv"]["minSingleTransAmount"])
+                        max_amount = float(adv["adv"]["maxSingleTransAmount"])
+                        avg_amount = (min_amount + max_amount) / 2
+                        volumes.append(avg_amount)
+                    except (ValueError, KeyError):
+                        continue
+                
+                avg_price = sum(prices) / len(prices) if prices else best_price
+                volume_24h = sum(volumes) if volumes else 0
+                
+                # Información del mejor anuncio
+                best_ad_info = {
+                    "price": best_price,
+                    "min_amount": float(best_ad.get("minSingleTransAmount", 0)),
+                    "max_amount": float(best_ad.get("maxSingleTransAmount", 0)),
+                    "merchant": best_ad.get("fiatSymbol", "Unknown"),
+                    "pay_types": best_ad.get("payTypes", []),
+                    "user_type": "merchant" if best_ad.get("userType") == 1 else "user"
+                }
+                
+                return {
+                    "status": "success",
+                    "data": {
+                        "usdt_ves_sell": best_price,
+                        "usdt_ves_avg": avg_price,
+                        "volume_24h": volume_24h,
+                        "best_ad": best_ad_info,
+                        "total_ads": len(data["data"]),
+                        "timestamp": datetime.now().isoformat(),
+                        "source": "binance_p2p",
+                        "api_method": "official_api",
+                        "trade_type": "buy_usdt"
                     }
                 }
             except (ValueError, KeyError, IndexError) as e:
@@ -592,6 +721,15 @@ async def get_binance_p2p_rates():
     """Cotizaciones Binance P2P en tiempo real"""
     return await fetch_binance_p2p_simple()
 
+@app.get("/api/v1/rates/binance-p2p/sell")
+async def get_binance_p2p_sell_rates():
+    """
+    Precios de Venta de USDT (Comprar USDT con VES)
+    
+    Descripción: Obtiene el mejor precio para comprar USDT con VES
+    """
+    return await fetch_binance_p2p_sell_simple()
+
 @app.get("/api/v1/rates/binance")
 async def get_binance_rate():
     """
@@ -635,49 +773,62 @@ async def get_binance_rate():
 
 @app.get("/api/v1/rates/binance-p2p/complete")
 async def get_binance_p2p_complete():
-    """Cotizaciones completas Binance P2P en tiempo real"""
+    """
+    Análisis Completo de Binance P2P
+    
+    Descripción: Obtiene precios de compra y venta con análisis de spread y liquidez
+    """
     try:
         # Obtener datos de compra y venta
         buy_data = await fetch_binance_p2p_simple()
+        sell_data = await fetch_binance_p2p_sell_simple()
         
-        # Para venta, cambiar el parámetro tradeType
-        import httpx
-        url = "https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search"
-        sell_params = {
-            "page": 1,
-            "rows": 10,
-            "payTypes": [],
-            "asset": "USDT",
-            "tradeType": "SELL",
-            "fiat": "VES",
-            "publisherType": None
-        }
-        
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.post(url, json=sell_params)
-            response.raise_for_status()
+        if buy_data["status"] == "success" and sell_data["status"] == "success":
+            buy_price = buy_data["data"]["usdt_ves_buy"]
+            sell_price = sell_data["data"]["usdt_ves_sell"]
             
-        sell_data = response.json()
-        
-        sell_price = 0
-        if sell_data.get("success") and sell_data.get("data"):
-            sell_price = float(sell_data["data"][0]["adv"]["price"])
-        
-        return {
-            "status": "success",
-            "data": {
-                "buy": {
-                    "price": buy_data.get("data", {}).get("usdt_ves_buy", 0),
-                    "volume": buy_data.get("data", {}).get("volume_24h", 0)
-                },
-                "sell": {
-                    "price": sell_price,
-                    "volume": 0
-                },
-                "timestamp": datetime.now().isoformat(),
-                "source": "Binance P2P"
+            # Calcular spread interno
+            spread_internal = sell_price - buy_price
+            spread_percentage = (spread_internal / buy_price) * 100 if buy_price > 0 else 0
+            
+            # Calcular volumen total
+            total_volume = buy_data["data"]["volume_24h"] + sell_data["data"]["volume_24h"]
+            
+            # Determinar liquidez
+            liquidity_score = "high" if total_volume > 1000 else "medium" if total_volume > 500 else "low"
+            
+            return {
+                "status": "success",
+                "data": {
+                    "buy_usdt": {
+                        "price": buy_price,
+                        "avg_price": buy_data["data"]["usdt_ves_avg"],
+                        "best_ad": buy_data["data"]["best_ad"],
+                        "total_ads": buy_data["data"]["total_ads"]
+                    },
+                    "sell_usdt": {
+                        "price": sell_price,
+                        "avg_price": sell_data["data"]["usdt_ves_avg"],
+                        "best_ad": sell_data["data"]["best_ad"],
+                        "total_ads": sell_data["data"]["total_ads"]
+                    },
+                    "market_analysis": {
+                        "spread_internal": round(spread_internal, 4),
+                        "spread_percentage": round(spread_percentage, 2),
+                        "volume_24h": total_volume,
+                        "liquidity_score": liquidity_score
+                    },
+                    "timestamp": datetime.now().isoformat(),
+                    "source": "binance_p2p",
+                    "api_method": "official_api"
+                }
             }
-        }
+        else:
+            return {
+                "status": "error",
+                "error": "No se pudieron obtener todos los datos de Binance P2P",
+                "timestamp": datetime.now().isoformat()
+            }
     except Exception as e:
         return {
             "status": "error",
@@ -757,13 +908,54 @@ async def get_exchanges():
 
 @app.get("/api/v1/rates/compare")
 async def compare_rates():
-    """Comparar cotizaciones del BCV vs Binance P2P"""
+    """
+    Comparación de Fuentes
+    
+    Descripción: Compara cotizaciones entre diferentes fuentes (BCV vs Binance P2P)
+    """
     try:
-        comparison = await rates_service.compare_exchanges("USDT/VES")
-        return {
-            "status": "success",
-            "data": comparison
-        }
+        # Obtener datos del BCV
+        bcv_data = await scrape_bcv_simple()
+        
+        # Obtener datos de Binance P2P (compra y venta)
+        binance_buy = await fetch_binance_p2p_simple()
+        binance_sell = await fetch_binance_p2p_sell_simple()
+        
+        if bcv_data["status"] == "success" and binance_buy["status"] == "success" and binance_sell["status"] == "success":
+            # Calcular spread entre BCV y Binance P2P
+            bcv_usd = bcv_data["data"]["usd_ves"]
+            binance_avg = (binance_buy["data"]["usdt_ves_buy"] + binance_sell["data"]["usdt_ves_sell"]) / 2
+            
+            spread_bcv_binance = bcv_usd - binance_avg
+            spread_percentage = (spread_bcv_binance / binance_avg) * 100 if binance_avg > 0 else 0
+            
+            return {
+                "status": "success",
+                "data": {
+                    "bcv": {
+                        "usd_ves": bcv_data["data"]["usd_ves"],
+                        "eur_ves": bcv_data["data"]["eur_ves"],
+                        "timestamp": bcv_data["data"]["timestamp"]
+                    },
+                    "binance_p2p": {
+                        "usdt_ves_buy": binance_buy["data"]["usdt_ves_buy"],
+                        "usdt_ves_sell": binance_sell["data"]["usdt_ves_sell"],
+                        "usdt_ves_avg": binance_avg,
+                        "timestamp": binance_buy["data"]["timestamp"]
+                    },
+                    "analysis": {
+                        "spread_bcv_binance": round(spread_bcv_binance, 4),
+                        "spread_percentage": round(spread_percentage, 2),
+                        "timestamp": datetime.now().isoformat()
+                    }
+                }
+            }
+        else:
+            return {
+                "status": "error",
+                "error": "No se pudieron obtener todas las cotizaciones",
+                "timestamp": datetime.now().isoformat()
+            }
     except Exception as e:
         return {
             "status": "error",
