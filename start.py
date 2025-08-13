@@ -6,7 +6,7 @@ Maneja correctamente la variable de entorno PORT
 
 import os
 import uvicorn
-from simple_server import app
+from simple_server_railway import app
 
 if __name__ == "__main__":
     # Obtener puerto de Railway o usar 8000 por defecto
