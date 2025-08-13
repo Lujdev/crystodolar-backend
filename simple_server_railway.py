@@ -22,6 +22,49 @@ except ImportError:
     print("⚠️ DatabaseService no disponible - funcionando sin persistencia")
     DATABASE_AVAILABLE = False
 
+# Función auxiliar para verificar si las tasas cambiaron
+async def check_rate_changed(exchange_code: str, currency_pair: str, new_buy_price: float, new_sell_price: float = None, tolerance: float = 0.0001) -> bool:
+    """
+    Verificar si las tasas cambiaron significativamente para evitar duplicados
+    tolerance: tolerancia en porcentaje (0.01% por defecto = cambios de 2 decimales)
+    """
+    if not DATABASE_AVAILABLE:
+        return True  # Si no hay BD, siempre insertar
+    
+    try:
+        current_rates = await DatabaseService.get_current_rates()
+        
+        for rate in current_rates:
+            if rate["exchange_code"].upper() == exchange_code.upper() and rate["currency_pair"] == currency_pair:
+                current_buy = rate.get("buy_price", 0)
+                current_sell = rate.get("sell_price", 0)
+                
+                # Si no hay sell_price, usar buy_price para ambos
+                if new_sell_price is None:
+                    new_sell_price = new_buy_price
+                
+                # Calcular diferencia porcentual
+                buy_diff = abs(new_buy_price - current_buy) / current_buy if current_buy > 0 else 1
+                sell_diff = abs(new_sell_price - current_sell) / current_sell if current_sell > 0 else 1
+                
+                # Si hay cambio significativo (mayor a la tolerancia), insertar
+                if buy_diff > tolerance or sell_diff > tolerance:
+                    print(f"🔄 Tasa cambió: {exchange_code} {currency_pair}")
+                    print(f"   Buy: {current_buy} → {new_buy_price} (diff: {buy_diff*100:.2f}%)")
+                    print(f"   Sell: {current_sell} → {new_sell_price} (diff: {sell_diff*100:.2f}%)")
+                    return True
+                else:
+                    print(f"✅ Tasa sin cambios: {exchange_code} {currency_pair} (tolerancia: {tolerance*100}%)")
+                    return False
+        
+        # Si no existe en current_rates, insertar
+        print(f"🆕 Nueva tasa: {exchange_code} {currency_pair}")
+        return True
+        
+    except Exception as e:
+        print(f"⚠️ Error verificando cambios de tasa: {e}")
+        return True  # En caso de error, insertar por seguridad
+
 # Suprimir advertencias de SSL para Railway
 warnings.filterwarnings('ignore', message='Unverified HTTPS request')
 
@@ -378,17 +421,29 @@ async def scrape_bcv_simple():
                     eur_ves = float(match.group(1).replace(',', '.'))
                     break
         
-        # Guardar en base de datos si está disponible
+        # Verificar si las tasas cambiaron antes de insertar
         if DATABASE_AVAILABLE and usd_ves > 0:
-            try:
-                await DatabaseService.save_bcv_rates(usd_ves, eur_ves, {
-                    "source": "BCV",
-                    "url": final_url,
-                    "timestamp": datetime.now().isoformat()
-                })
-                print("💾 BCV rates guardados en base de datos")
-            except Exception as e:
-                print(f"⚠️ No se pudieron guardar BCV rates en BD: {e}")
+            # Verificar USD/VES
+            usd_changed = await check_rate_changed("BCV", "USD/VES", usd_ves)
+            
+            # Verificar EUR/VES (solo si hay valor)
+            eur_changed = False
+            if eur_ves > 0:
+                eur_changed = await check_rate_changed("BCV", "EUR/VES", eur_ves)
+            
+            # Solo insertar si hay cambios
+            if usd_changed or eur_changed:
+                try:
+                    await DatabaseService.save_bcv_rates(usd_ves, eur_ves, {
+                        "source": "BCV",
+                        "url": final_url,
+                        "timestamp": datetime.now().isoformat()
+                    })
+                    print("💾 BCV rates INSERTADOS en base de datos (tasas cambiaron)")
+                except Exception as e:
+                    print(f"⚠️ No se pudieron guardar BCV rates en BD: {e}")
+            else:
+                print("⏭️ BCV rates sin cambios - no se insertan en histórico")
         
         return {
             "status": "success",
@@ -499,13 +554,18 @@ async def fetch_binance_p2p_simple():
                     "trade_type": "buy_usdt"
                 }
                 
-                # Guardar en base de datos si está disponible
+                # Verificar si las tasas cambiaron antes de insertar
                 if DATABASE_AVAILABLE:
-                    try:
-                        await DatabaseService.save_binance_p2p_rates(binance_data)
-                        print("💾 Binance P2P rates guardados en base de datos")
-                    except Exception as e:
-                        print(f"⚠️ No se pudieron guardar Binance P2P rates en BD: {e}")
+                    rate_changed = await check_rate_changed("BINANCE_P2P", "USDT/VES", best_price, best_price)
+                    
+                    if rate_changed:
+                        try:
+                            await DatabaseService.save_binance_p2p_rates(binance_data)
+                            print("💾 Binance P2P rates INSERTADOS en base de datos (tasas cambiaron)")
+                        except Exception as e:
+                            print(f"⚠️ No se pudieron guardar Binance P2P rates en BD: {e}")
+                    else:
+                        print("⏭️ Binance P2P rates sin cambios - no se insertan en histórico")
                 
                 return {
                     "status": "success",
@@ -630,13 +690,18 @@ async def _fetch_binance_p2p_rates_no_save():
                     "trade_type": "sell_usdt"
                 }
                 
-                # Guardar en base de datos si está disponible
+                # Verificar si las tasas cambiaron antes de insertar
                 if DATABASE_AVAILABLE:
-                    try:
-                        await DatabaseService.save_binance_p2p_rates(binance_data)
-                        print("💾 Binance P2P rates (sell) guardados en base de datos")
-                    except Exception as e:
-                        print(f"⚠️ No se pudieron guardar Binance P2P rates (sell) en BD: {e}")
+                    rate_changed = await check_rate_changed("BINANCE_P2P", "USDT/VES", best_price, best_price)
+                    
+                    if rate_changed:
+                        try:
+                            await DatabaseService.save_binance_p2p_rates(binance_data)
+                            print("💾 Binance P2P rates (sell) INSERTADOS en base de datos (tasas cambiaron)")
+                        except Exception as e:
+                            print(f"⚠️ No se pudieron guardar Binance P2P rates (sell) en BD: {e}")
+                    else:
+                        print("⏭️ Binance P2P rates (sell) sin cambios - no se insertan en histórico")
                 
                 return {
                     "status": "success",
@@ -757,13 +822,18 @@ async def _fetch_binance_p2p_sell_rates_no_save():
                     "trade_type": "buy_usdt"
                 }
                 
-                # Guardar en base de datos si está disponible
+                # Verificar si las tasas cambiaron antes de insertar
                 if DATABASE_AVAILABLE:
-                    try:
-                        await DatabaseService.save_binance_p2p_rates(binance_data)
-                        print("💾 Binance P2P rates (buy) guardados en base de datos")
-                    except Exception as e:
-                        print(f"⚠️ No se pudieron guardar Binance P2P rates (buy) en BD: {e}")
+                    rate_changed = await check_rate_changed("BINANCE_P2P", "USDT/VES", best_price, best_price)
+                    
+                    if rate_changed:
+                        try:
+                            await DatabaseService.save_binance_p2p_rates(binance_data)
+                            print("💾 Binance P2P rates (buy) INSERTADOS en base de datos (tasas cambiaron)")
+                        except Exception as e:
+                            print(f"⚠️ No se pudieron guardar Binance P2P rates (buy) en BD: {e}")
+                    else:
+                        print("⏭️ Binance P2P rates (buy) sin cambios - no se insertan en histórico")
                 
                 return {
                     "status": "success",
@@ -1177,10 +1247,17 @@ async def get_binance_p2p_complete():
             
             # IMPORTANTE: Solo guardar UNA vez usando el método específico para datos completos
             # NO guardar usando las funciones individuales para evitar duplicados
+            # Verificar si las tasas cambiaron antes de insertar
             try:
                 if DATABASE_AVAILABLE:
-                    await DatabaseService.save_binance_p2p_complete_rates(complete_result)
-                    print("💾 Binance P2P COMPLETE rates guardados en base de datos (UNA SOLA LÍNEA)")
+                    # Verificar si hay cambios significativos en cualquiera de los precios
+                    buy_changed = await check_rate_changed("BINANCE_P2P", "USDT/VES", buy_price, sell_price)
+                    
+                    if buy_changed:
+                        await DatabaseService.save_binance_p2p_complete_rates(complete_result)
+                        print("💾 Binance P2P COMPLETE rates INSERTADOS en base de datos (UNA SOLA LÍNEA - tasas cambiaron)")
+                    else:
+                        print("⏭️ Binance P2P COMPLETE rates sin cambios - no se insertan en histórico")
                 else:
                     print("💾 Binance P2P COMPLETE rates obtenidos (sin BD en Railway)")
             except Exception as e:
