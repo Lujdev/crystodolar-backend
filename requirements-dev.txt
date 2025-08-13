@@ -1,6 +1,6 @@
 # ==========================================
-# CrystoDolar Backend - Production Requirements
-# Solo dependencias esenciales para producción
+# CrystoDolar Backend - Development Requirements
+# Todas las dependencias para desarrollo local
 # ==========================================
 
 # Core Framework
@@ -10,10 +10,12 @@ uvicorn[standard]==0.24.0
 # Database
 asyncpg==0.29.0
 sqlalchemy[asyncio]==2.0.23
+alembic==1.12.1
 
 # Environment & Configuration
 python-dotenv==1.0.0
 pydantic[email]==2.5.0
+pydantic-settings==2.1.0
 
 # HTTP Client for external APIs
 httpx==0.25.2
@@ -26,17 +28,42 @@ python-multipart==0.0.6
 
 # Background Tasks & Scheduling
 apscheduler==3.10.4
+celery[redis]==5.3.4  # Opcional para tareas pesadas
+
+# Cache & Performance
+redis==5.0.1
+slowapi==0.1.9  # Rate limiting
 
 # Data Processing
 pandas==2.1.4
 numpy==1.26.2
 
-# Web Scraping
+# Web Scraping (para APIs sin documentar)
 beautifulsoup4==4.12.2
 lxml==4.9.3
 
 # Monitoring & Logging
 loguru==0.7.2
+sentry-sdk[fastapi]==1.39.1
+
+# Development Tools
+pytest==7.4.3
+pytest-asyncio==0.21.1
+black==23.11.0
+isort==5.12.0
+flake8==6.1.0
+
+# CORS & Middleware
+python-cors==1.7.0
+
+# Optional: WebSockets for real-time
+websockets==12.0
+
+# Optional: Telegram bot notifications
+python-telegram-bot==20.7
+
+# Optional: Email notifications
+fastapi-mail==1.4.1
 
 # Production
 gunicorn==21.2.0
