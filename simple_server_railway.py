@@ -1,7 +1,30 @@
 #!/usr/bin/env python3
 """
 CrystoDolar - Servidor Simple para Railway
-Versión simplificada sin dependencias complejas
+Versión de PRODUCCIÓN - Optimizada y segura
+
+FUNCIONALIDAD DE GUARDADO AUTOMÁTICO:
+=====================================
+Este servidor incluye guardado automático en rate_history para los siguientes endpoints:
+
+✅ /api/v1/rates/current - Guarda automáticamente todas las tasas obtenidas
+✅ /api/v1/rates/summary - Guarda automáticamente las tasas del resumen
+✅ /api/v1/rates/compare - Guarda automáticamente las tasas de comparación
+
+CARACTERÍSTICAS:
+- Guardado inteligente: Solo inserta si hay cambios significativos
+- Evita duplicados innecesarios
+- Mantiene consistencia con DatabaseService existente
+- Logs detallados del proceso de guardado
+- Endpoint de monitoreo: /api/v1/rates/auto-save-status
+- Endpoints de debug eliminados para seguridad en producción
+
+BENEFICIOS:
+- Historial completo de todas las consultas
+- Datos para análisis de tendencias
+- Gráficas históricas más precisas
+- Monitoreo del comportamiento del mercado
+- Seguridad mejorada para entornos de producción
 """
 
 import os
@@ -143,7 +166,11 @@ def check_dependencies():
     # Obtener DATABASE_URL
     DATABASE_URL = os.getenv("DATABASE_URL")
     if DATABASE_URL:
-        print(f"✅ DATABASE_URL configurado: {DATABASE_URL[:50]}..." if len(DATABASE_URL) > 50 else f"✅ DATABASE_URL configurado: {DATABASE_URL}")
+        # Ocultar información sensible en producción
+        if os.getenv("ENVIRONMENT", "development") == "production":
+            print("✅ DATABASE_URL configurado (información oculta en producción)")
+        else:
+            print(f"✅ DATABASE_URL configurado: {DATABASE_URL[:20]}..." if len(DATABASE_URL) > 20 else f"✅ DATABASE_URL configurado: {DATABASE_URL}")
     else:
         print("⚠️ DATABASE_URL no configurado - verificar archivo .env")
 
@@ -154,10 +181,18 @@ check_dependencies()
 # Funciones de utilidad
 # ==========================================
 
-async def check_rate_changed(exchange_code: str, currency_pair: str, new_buy_price: float, new_sell_price: float = None, tolerance: float = 0.0001) -> bool:
+async def check_rate_changed(exchange_code: str, currency_pair: str, new_price: float, tolerance: float = 0.0001) -> bool:
     """
-    Verificar si las tasas cambiaron significativamente para evitar duplicados
-    tolerance: tolerancia en porcentaje (0.01% por defecto = cambios de 2 decimales)
+    Verificar si una tasa específica cambió significativamente para evitar duplicados
+    
+    Args:
+        exchange_code: Código del exchange (BCV, BINANCE_P2P, etc.)
+        currency_pair: Par de monedas (USD/VES, USDT/VES, etc.)
+        new_price: Nuevo precio a verificar
+        tolerance: Tolerancia en porcentaje (0.01% por defecto = cambios de 2 decimales)
+    
+    Returns:
+        bool: True si hay cambios significativos, False si no hay cambios
     """
     if not DATABASE_AVAILABLE:
         return True  # Si no hay BD, siempre insertar
@@ -167,26 +202,55 @@ async def check_rate_changed(exchange_code: str, currency_pair: str, new_buy_pri
         
         for rate in current_rates:
             if rate["exchange_code"].upper() == exchange_code.upper() and rate["currency_pair"] == currency_pair:
-                current_buy = rate.get("buy_price", 0)
-                current_sell = rate.get("sell_price", 0)
-                
-                # Si no hay sell_price, usar buy_price para ambos
-                if new_sell_price is None:
-                    new_sell_price = new_buy_price
-                
-                # Calcular diferencia porcentual
-                buy_diff = abs(new_buy_price - current_buy) / current_buy if current_buy > 0 else 1
-                sell_diff = abs(new_sell_price - current_sell) / current_sell if current_sell > 0 else 1
-                
-                # Si hay cambio significativo (mayor a la tolerancia), insertar
-                if buy_diff > tolerance or sell_diff > tolerance:
-                    print(f"🔄 Tasa cambió: {exchange_code} {currency_pair}")
-                    print(f"   Buy: {current_buy} → {new_buy_price} (diff: {buy_diff*100:.2f}%)")
-                    print(f"   Sell: {current_sell} → {new_sell_price} (diff: {sell_diff*100:.2f}%)")
-                    return True
+                # Para Binance P2P, comparar con el precio más cercano (buy o sell)
+                # LÓGICA ESPECIAL: Como Binance P2P tiene dos precios diferentes,
+                # comparamos el nuevo precio con ambos precios existentes y usamos
+                # la diferencia más pequeña para determinar si hay cambios significativos
+                if exchange_code.upper() == "BINANCE_P2P":
+                    current_buy = rate.get("buy_price", 0)
+                    current_sell = rate.get("sell_price", 0)
+                    
+                    # Calcular diferencias con ambos precios
+                    buy_diff = abs(new_price - current_buy) / current_buy if current_buy > 0 else 1
+                    sell_diff = abs(new_price - current_sell) / current_sell if current_sell > 0 else 1
+                    
+                    # Usar la diferencia más pequeña para determinar si hay cambios
+                    # Esto evita insertar cuando el nuevo precio está dentro del rango existente
+                    min_diff = min(buy_diff, sell_diff) if current_buy > 0 and current_sell > 0 else max(buy_diff, sell_diff)
+                    
+                    if min_diff > tolerance:
+                        print(f"🔄 Tasa cambió: {exchange_code} {currency_pair}")
+                        print(f"   Precio anterior: Buy={current_buy}, Sell={current_sell}")
+                        print(f"   Nuevo precio: {new_price}")
+                        print(f"   Diferencia mínima: {min_diff*100:.2f}% (tolerancia: {tolerance*100}%)")
+                        return True
+                    else:
+                        print(f"✅ Tasa sin cambios: {exchange_code} {currency_pair} (tolerancia: {tolerance*100}%)")
+                        print(f"   Precio anterior: Buy={current_buy}, Sell={current_sell}")
+                        print(f"   Nuevo precio: {new_price}")
+                        print(f"   Diferencia mínima: {min_diff*100:.2f}%")
+                        return False
                 else:
-                    print(f"✅ Tasa sin cambios: {exchange_code} {currency_pair} (tolerancia: {tolerance*100}%)")
-                    return False
+                    # Para otros exchanges (BCV, etc.), usar lógica simple
+                    current_price = rate.get("avg_price", rate.get("buy_price", 0))
+                    
+                    if current_price > 0:
+                        price_diff = abs(new_price - current_price) / current_price
+                        
+                        if price_diff > tolerance:
+                            print(f"🔄 Tasa cambió: {exchange_code} {currency_pair}")
+                            print(f"   Precio anterior: {current_price} → Nuevo: {new_price}")
+                            print(f"   Diferencia: {price_diff*100:.2f}% (tolerancia: {tolerance*100}%)")
+                            return True
+                        else:
+                            print(f"✅ Tasa sin cambios: {exchange_code} {currency_pair} (tolerancia: {tolerance*100}%)")
+                            print(f"   Precio anterior: {current_price} → Nuevo: {new_price}")
+                            print(f"   Diferencia: {price_diff*100:.2f}%")
+                            return False
+                    else:
+                        # Si no hay precio anterior, insertar
+                        print(f"🆕 Nueva tasa sin precio anterior: {exchange_code} {currency_pair}")
+                        return True
         
         # Si no existe en current_rates, insertar
         print(f"🆕 Nueva tasa: {exchange_code} {currency_pair}")
@@ -267,7 +331,7 @@ async def health_check():
                 "service": "crystodolar-backend",
                 "message": "Service is running",
                 "environment": os.getenv("ENVIRONMENT", "development"),
-                "database_url": os.getenv("DATABASE_URL", "not_configured")[:50] + "..." if os.getenv("DATABASE_URL") else "not_configured"
+                "database_url": "configured" if os.getenv("DATABASE_URL") else "not_configured"
             }
         )
     except Exception as e:
@@ -305,263 +369,16 @@ async def get_config():
         }
     )
 
-@app.get("/api/v1/debug/bcv")
-async def debug_bcv():
-    """Endpoint de debug para probar el scraping del BCV"""
-    try:
-        import httpx
-        
-        results = []
-        
-        for url in BCV_URLS:
-            try:
-                async with httpx.AsyncClient(
-                    timeout=10.0,
-                    follow_redirects=True,
-                    verify=False,  # Deshabilitar verificación SSL para Railway
-                    headers={
-                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-                    }
-                ) as client:
-                    response = await client.get(url)
-                    results.append({
-                        "url": url,
-                        "status_code": response.status_code,
-                        "final_url": str(response.url),
-                        "content_length": len(response.text),
-                        "content_preview": response.text[:500] + "..." if len(response.text) > 500 else response.text
-                    })
-            except Exception as e:
-                results.append({
-                    "url": url,
-                    "error": str(e)
-                })
-        
-        return create_response(
-            status="success",
-            data={
-                "test_results": results
-            }
-        )
-        
-    except Exception as e:
-        return create_response(
-            status="error",
-            error=str(e)
-        )
-
-@app.get("/api/v1/debug/database-check")
-async def check_database_rates():
-    """Endpoint para verificar qué hay en la base de datos"""
-    try:
-        if not DATABASE_AVAILABLE or not ASYNCPG_AVAILABLE or not DATABASE_URL:
-            return create_response(
-                status="error",
-                error="Base de datos, asyncpg o DATABASE_URL no disponible"
-            )
-        
-        conn = await asyncpg.connect(DATABASE_URL)
-        
-        # Verificar qué exchange_codes existen
-        exchanges = await conn.fetch("SELECT DISTINCT exchange_code FROM rate_history ORDER BY exchange_code")
-        
-        # Verificar los últimos registros para cada exchange
-        latest_rates = {}
-        for exchange in exchanges:
-            latest = await conn.fetchrow("""
-                SELECT exchange_code, currency_pair, avg_price, timestamp 
-                FROM rate_history 
-                WHERE exchange_code = $1 
-                ORDER BY timestamp DESC 
-                LIMIT 1
-            """, exchange['exchange_code'])
-            if latest:
-                latest_rates[exchange['exchange_code']] = {
-                    "currency_pair": latest['currency_pair'],
-                    "avg_price": latest['avg_price'],
-                    "timestamp": latest['timestamp'].isoformat() if latest['timestamp'] else None
-                }
-        
-        await conn.close()
-        
-        return create_response(
-            status="success",
-            data={
-                "available_exchanges": [ex['exchange_code'] for ex in exchanges],
-                "latest_rates": latest_rates
-            }
-        )
-        
-    except Exception as e:
-        return create_response(
-            status="error",
-            error=str(e)
-        )
-
-@app.get("/api/v1/debug/imports-status")
-async def check_imports_status():
-    """Endpoint para verificar el estado de todas las importaciones"""
-    return {
-        "status": "success",
-        "data": {
-            "database_service": DATABASE_AVAILABLE,
-            "asyncpg": ASYNCPG_AVAILABLE,
-            "database_url_configured": bool(DATABASE_URL),
-            "database_url_length": len(DATABASE_URL) if DATABASE_URL else 0,
-            "database_url_preview": DATABASE_URL[:50] + "..." if DATABASE_URL and len(DATABASE_URL) > 50 else DATABASE_URL,
-            "timestamp": datetime.now().isoformat()
-        }
-    }
-
-@app.get("/api/v1/debug/test-variation")
-async def test_variation_calculation():
-    """Endpoint para probar el cálculo de variación directamente"""
-    try:
-        if not DATABASE_AVAILABLE or not ASYNCPG_AVAILABLE or not DATABASE_URL:
-            return {
-                "status": "error",
-                "error": "Base de datos, asyncpg o DATABASE_URL no disponible",
-                "timestamp": datetime.now().isoformat()
-            }
-        
-        conn = await asyncpg.connect(DATABASE_URL)
-        
-        # Probar query específica para Binance P2P
-        binance_query = """
-            SELECT avg_price, timestamp 
-            FROM rate_history 
-            WHERE exchange_code = 'BINANCE_P2P' AND currency_pair = 'USDT/VES'
-            ORDER BY timestamp DESC 
-            LIMIT 1
-        """
-        
-        binance_result = await conn.fetchrow(binance_query)
-        
-        # Probar query específica para BCV
-        bcv_query = """
-            SELECT avg_price, timestamp 
-            FROM rate_history 
-            WHERE exchange_code = 'BCV' AND currency_pair = 'USD/VES'
-            ORDER BY timestamp DESC 
-            LIMIT 1
-        """
-        
-        bcv_result = await conn.fetchrow(bcv_query)
-        
-        # Verificar todos los exchange_codes disponibles
-        all_exchanges = await conn.fetch("SELECT DISTINCT exchange_code FROM rate_history")
-        
-        await conn.close()
-        
-        return {
-            "status": "success",
-            "data": {
-                "binance_p2p_query": binance_query,
-                "binance_p2p_result": {
-                    "avg_price": binance_result['avg_price'] if binance_result else None,
-                    "timestamp": binance_result['timestamp'].isoformat() if binance_result and binance_result['timestamp'] else None
-                },
-                "bcv_query": bcv_query,
-                "bcv_result": {
-                    "avg_price": bcv_result['avg_price'] if bcv_result else None,
-                    "timestamp": bcv_result['timestamp'].isoformat() if bcv_result and bcv_result['timestamp'] else None
-                },
-                "all_exchanges_in_rate_history": [ex['exchange_code'] for ex in all_exchanges],
-                "timestamp": datetime.now().isoformat()
-            }
-        }
-        
-    except Exception as e:
-        return {
-            "status": "error",
-            "error": str(e),
-            "timestamp": datetime.now().isoformat()
-        }
-
-@app.get("/api/v1/debug/ssl-test")
-async def test_ssl_connection():
-    """Endpoint específico para probar conexiones SSL"""
-    try:
-        import httpx
-        
-        test_urls = [
-            {"url": "https://www.bcv.org.ve/", "description": "BCV HTTPS"},
-            {"url": "http://www.bcv.org.ve/", "description": "BCV HTTP"},
-            {"url": "https://httpbin.org/get", "description": "HTTPBin HTTPS (control)"}
-        ]
-        
-        results = []
-        
-        for test in test_urls:
-            try:
-                # Probar con SSL habilitado
-                try:
-                    async with httpx.AsyncClient(
-                        timeout=10.0,
-                        verify=True,  # SSL habilitado
-                        headers={"User-Agent": "Mozilla/5.0"}
-                    ) as client:
-                        response = await client.get(test["url"])
-                        results.append({
-                            "url": test["url"],
-                            "description": test["description"],
-                            "ssl_enabled": True,
-                            "status_code": response.status_code,
-                            "success": True,
-                            "error": None
-                        })
-                except Exception as ssl_error:
-                    # Si falla SSL, probar sin verificación
-                    try:
-                        async with httpx.AsyncClient(
-                            timeout=10.0,
-                            verify=False,  # SSL deshabilitado
-                            headers={"User-Agent": "Mozilla/5.0"}
-                        ) as client:
-                            response = await client.get(test["url"])
-                            results.append({
-                                "url": test["url"],
-                                "description": test["description"],
-                                "ssl_enabled": False,
-                                "status_code": response.status_code,
-                                "success": True,
-                                "error": f"SSL falló, pero funcionó sin verificación: {str(ssl_error)}"
-                            })
-                    except Exception as no_ssl_error:
-                        results.append({
-                            "url": test["url"],
-                            "description": test["description"],
-                            "ssl_enabled": False,
-                            "status_code": None,
-                            "success": False,
-                            "error": f"Falló incluso sin SSL: {str(no_ssl_error)}"
-                        })
-                        
-            except Exception as e:
-                results.append({
-                    "url": test["url"],
-                    "description": test["description"],
-                    "ssl_enabled": None,
-                    "status_code": None,
-                    "success": False,
-                    "error": str(e)
-                })
-        
-        return {
-            "status": "success",
-            "data": {
-                "ssl_test_results": results,
-                "timestamp": datetime.now().isoformat(),
-                "note": "SSL deshabilitado para Railway por problemas de certificados"
-            }
-        }
-        
-    except Exception as e:
-        return {
-            "status": "error",
-            "error": str(e),
-            "timestamp": datetime.now().isoformat()
-        }
+# ==========================================
+# ENDPOINTS DE DEBUG ELIMINADOS PARA PRODUCCIÓN
+# ==========================================
+# Los siguientes endpoints fueron eliminados para mantener la seguridad en producción:
+# - /api/v1/debug/bcv
+# - /api/v1/debug/database-check  
+# - /api/v1/debug/imports-status
+# - /api/v1/debug/test-variation
+# - /api/v1/debug/ssl-test
+# ==========================================
 
 # ==========================================
 # Funciones de scraping
@@ -1096,6 +913,9 @@ async def get_current_rates(
     
     - **exchange_code**: Filtrar por exchange (bcv, binance_p2p)
     - **currency_pair**: Filtrar por par de monedas
+    
+    NOTA: Este endpoint automáticamente guarda las tasas obtenidas en rate_history
+    para mantener un historial completo de todas las consultas.
     """
     # Siempre obtener datos en tiempo real para incluir variaciones calculadas
     try:
@@ -1103,11 +923,34 @@ async def get_current_rates(
             exchange_code=exchange_code,
             currency_pair=currency_pair
         )
+        
+        # IMPORTANTE: Guardar automáticamente las tasas obtenidas en rate_history
+        # NOTA: Binance P2P ya se guarda automáticamente en get_binance_p2p_complete()
+        # por lo que solo guardamos BCV y otros exchanges que no tengan guardado automático
+        if rates and DATABASE_AVAILABLE:
+            try:
+                # Filtrar tasas que ya se guardaron automáticamente
+                rates_to_save = []
+                for rate in rates:
+                    if rate.get('exchange_code') != 'binance_p2p':
+                        rates_to_save.append(rate)
+                
+                if rates_to_save:
+                    await _save_current_rates_to_history(rates_to_save)
+                    print(f"💾 Tasas adicionales guardadas en rate_history: {len(rates_to_save)} registros (excluyendo Binance P2P)")
+                else:
+                    print("⏭️ Todas las tasas ya se guardaron automáticamente (incluyendo Binance P2P)")
+                    
+            except Exception as save_error:
+                print(f"⚠️ Error guardando tasas adicionales en rate_history: {save_error}")
+                # Continuar sin fallar el endpoint principal
+        
         return {
             "status": "success",
             "data": rates,
             "count": len(rates),
             "source": "realtime_with_variations",
+            "auto_saved_to_history": DATABASE_AVAILABLE,
             "timestamp": datetime.now().isoformat()
         }
     except Exception as e:
@@ -1121,6 +964,7 @@ async def get_current_rates(
                         "data": db_rates,
                         "count": len(db_rates),
                         "source": "database_fallback",
+                        "auto_saved_to_history": False,  # Ya están en BD
                         "timestamp": datetime.now().isoformat()
                     }
             except Exception as db_error:
@@ -1131,6 +975,171 @@ async def get_current_rates(
             "error": f"Error obteniendo cotizaciones: {str(e)}",
             "timestamp": datetime.now().isoformat()
         }
+
+async def _save_current_rates_to_history(rates: List[Dict[str, Any]]) -> None:
+    """
+    Guardar automáticamente las tasas actuales en rate_history
+    
+    Esta función se ejecuta cada vez que se llama a /api/v1/rates/current
+    para mantener un historial completo de todas las consultas.
+    
+    NOTA: Binance P2P ya se guarda automáticamente en get_binance_p2p_complete(),
+    por lo que esta función solo debe recibir tasas de otros exchanges para evitar
+    duplicados en rate_history.
+    """
+    if not rates or not DATABASE_AVAILABLE:
+        return
+    
+    try:
+        # Agrupar tasas por exchange_code para evitar duplicados innecesarios
+        rates_by_exchange = {}
+        for rate in rates:
+            exchange_key = f"{rate.get('exchange_code', 'unknown')}_{rate.get('currency_pair', 'unknown')}"
+            if exchange_key not in rates_by_exchange:
+                rates_by_exchange[exchange_key] = rate
+        
+        # Guardar cada tasa única en rate_history
+        for exchange_key, rate in rates_by_exchange.items():
+            try:
+                # Verificar si la tasa cambió significativamente antes de insertar
+                should_insert = await _should_insert_rate_to_history(rate)
+                
+                if should_insert:
+                    await _insert_single_rate_to_history(rate)
+                    print(f"💾 Tasa guardada en rate_history: {rate.get('exchange_code')} {rate.get('currency_pair')}")
+                else:
+                    print(f"⏭️ Tasa sin cambios significativos: {rate.get('exchange_code')} {rate.get('currency_pair')}")
+                    
+            except Exception as rate_error:
+                print(f"⚠️ Error procesando tasa individual {exchange_key}: {rate_error}")
+                continue
+                
+    except Exception as e:
+        print(f"❌ Error general guardando tasas en rate_history: {e}")
+
+async def _should_insert_rate_to_history(rate: Dict[str, Any]) -> bool:
+    """
+    Determinar si una tasa debe ser insertada en rate_history
+    
+    Evita duplicados innecesarios verificando si hay cambios significativos
+    """
+    try:
+        exchange_code = rate.get('exchange_code')
+        currency_pair = rate.get('currency_pair')
+        current_price = rate.get('avg_price') or rate.get('buy_price')
+        
+        if not all([exchange_code, currency_pair, current_price]):
+            return True  # Insertar si faltan datos críticos
+        
+        # Verificar si hay cambios significativos usando la función existente
+        return await check_rate_changed(exchange_code, currency_pair, current_price)
+        
+    except Exception as e:
+        print(f"⚠️ Error verificando si insertar tasa: {e}")
+        return True  # En caso de error, insertar por seguridad
+
+async def _insert_single_rate_to_history(rate: Dict[str, Any]) -> None:
+    """
+    Insertar una sola tasa en rate_history
+    
+    Usa el DatabaseService existente para mantener consistencia
+    """
+    try:
+        exchange_code = rate.get('exchange_code')
+        currency_pair = rate.get('currency_pair')
+        buy_price = rate.get('buy_price')
+        sell_price = rate.get('sell_price')
+        avg_price = rate.get('avg_price')
+        volume_24h = rate.get('volume_24h')
+        source = rate.get('source', exchange_code.lower())
+        api_method = rate.get('api_method', 'api_call')
+        trade_type = rate.get('trade_type', 'general')
+        
+        # Validar datos mínimos
+        if not all([exchange_code, currency_pair]):
+            print(f"⚠️ Datos insuficientes para guardar: {exchange_code} {currency_pair}")
+            return
+        
+        # Si no hay avg_price, calcularlo
+        if not avg_price and buy_price and sell_price:
+            avg_price = (buy_price + sell_price) / 2
+        elif not avg_price and buy_price:
+            avg_price = buy_price
+        elif not avg_price and sell_price:
+            avg_price = sell_price
+        
+        # Usar el DatabaseService existente para mantener consistencia
+        if exchange_code.upper() == "BCV":
+            if currency_pair == "USD/VES":
+                await DatabaseService.save_bcv_rates(
+                    buy_price or avg_price, 
+                    rate.get('eur_ves', 0), 
+                    {"source": "auto_save_from_current", "timestamp": datetime.now().isoformat()}
+                )
+            elif currency_pair == "EUR/VES":
+                await DatabaseService.save_bcv_rates(
+                    rate.get('usd_ves', 0), 
+                    sell_price or avg_price, 
+                    {"source": "auto_save_from_current", "timestamp": datetime.now().isoformat()}
+                )
+        elif exchange_code.upper() == "BINANCE_P2P":
+            # Crear estructura compatible con save_binance_p2p_complete_rates
+            binance_data = {
+                "buy_usdt": {"price": buy_price or avg_price, "avg_price": avg_price},
+                "sell_usdt": {"price": sell_price or avg_price, "avg_price": avg_price},
+                "market_analysis": {"volume_24h": volume_24h or 0},
+                "source": source,
+                "api_method": api_method
+            }
+            await DatabaseService.save_binance_p2p_complete_rates(binance_data)
+        else:
+            # Para otros exchanges, usar inserción directa
+            await _insert_generic_rate_to_history(
+                exchange_code, currency_pair, buy_price, sell_price, 
+                avg_price, volume_24h, source, api_method, trade_type
+            )
+            
+    except Exception as e:
+        print(f"❌ Error insertando tasa individual en rate_history: {e}")
+
+async def _insert_generic_rate_to_history(
+    exchange_code: str, 
+    currency_pair: str, 
+    buy_price: float, 
+    sell_price: float, 
+    avg_price: float, 
+    volume_24h: float, 
+    source: str, 
+    api_method: str, 
+    trade_type: str
+) -> None:
+    """
+    Insertar tasa genérica en rate_history para exchanges no específicos
+    """
+    try:
+        async for session in get_db_session():
+            from app.models.rate_models import RateHistory
+            
+            rate_history = RateHistory(
+                exchange_code=exchange_code,
+                currency_pair=currency_pair,
+                buy_price=buy_price,
+                sell_price=sell_price,
+                avg_price=avg_price,
+                volume_24h=volume_24h,
+                source=source,
+                api_method=api_method,
+                trade_type=trade_type,
+                timestamp=datetime.now()
+            )
+            
+            session.add(rate_history)
+            await session.commit()
+            
+            print(f"💾 Tasa genérica guardada: {exchange_code} {currency_pair}")
+            
+    except Exception as e:
+        print(f"❌ Error insertando tasa genérica: {e}")
 
 @app.get("/api/v1/rates/history")
 async def get_all_rate_history(limit: int = 100):
@@ -1174,18 +1183,32 @@ async def get_market_summary():
     - Spread entre BCV y Binance P2P
     - Variaciones 24h
     - Estado del mercado
+    
+    NOTA: Este endpoint también guarda automáticamente las tasas en rate_history
     """
     try:
         summary = await rates_service.get_market_summary()
+        
+        # IMPORTANTE: Guardar automáticamente las tasas del resumen en rate_history
+        if summary and "rates" in summary and DATABASE_AVAILABLE:
+            try:
+                await _save_current_rates_to_history(summary["rates"])
+                print(f"💾 Tasas del resumen guardadas automáticamente en rate_history: {len(summary['rates'])} registros")
+            except Exception as save_error:
+                print(f"⚠️ Error guardando tasas del resumen en rate_history: {save_error}")
+                # Continuar sin fallar el endpoint principal
+        
         return {
             "status": "success",
             "data": summary,
+            "auto_saved_to_history": DATABASE_AVAILABLE,
             "timestamp": datetime.now().isoformat()
         }
     except Exception as e:
         return {
             "status": "error",
             "error": f"Error obteniendo resumen: {str(e)}",
+            "auto_saved_to_history": False,
             "timestamp": datetime.now().isoformat()
         }
 
@@ -1456,19 +1479,38 @@ async def get_binance_p2p_complete():
             
             print(f"✅ Binance P2P completo obtenido: Buy={buy_price} (comprar USDT), Sell={sell_price} (vender USDT)")
             
+            # ==========================================
+            # GUARDADO INTELIGENTE PARA BINANCE P2P
+            # ==========================================
             # IMPORTANTE: Solo guardar UNA vez usando el método específico para datos completos
             # NO guardar usando las funciones individuales para evitar duplicados
-            # Verificar si las tasas cambiaron antes de insertar
+            # 
+            # LÓGICA DE VERIFICACIÓN:
+            # 1. Verificar si buy_price cambió significativamente
+            # 2. Verificar si sell_price cambió significativamente  
+            # 3. Solo insertar si hay cambios en cualquiera de los dos precios
+            # 4. Usar tolerancia configurable (0.01% por defecto)
+            # 5. Evitar duplicados innecesarios en rate_history
+            # 
+            # NOTA: Esta función se ejecuta desde /api/v1/rates/current y ya guarda
+            # automáticamente en rate_history, por lo que el endpoint principal NO debe
+            # volver a guardar las mismas tasas para evitar duplicados.
+            # ==========================================
             try:
                 if DATABASE_AVAILABLE:
-                    # Verificar si hay cambios significativos en cualquiera de los precios
-                    buy_changed = await check_rate_changed("BINANCE_P2P", "USDT/VES", buy_price, sell_price)
+                    # Verificar si hay cambios significativos en AMBOS precios por separado
+                    # Para Binance P2P, necesitamos verificar tanto buy_price como sell_price
+                    buy_price_changed = await check_rate_changed("BINANCE_P2P", "USDT/VES", buy_price)
+                    sell_price_changed = await check_rate_changed("BINANCE_P2P", "USDT/VES", sell_price)
                     
-                    if buy_changed:
+                    # Solo insertar si hay cambios en cualquiera de los dos precios
+                    if buy_price_changed or sell_price_changed:
                         await DatabaseService.save_binance_p2p_complete_rates(complete_result)
                         print("💾 Binance P2P COMPLETE rates INSERTADOS en base de datos (UNA SOLA LÍNEA - tasas cambiaron)")
+                        print(f"   Buy price cambió: {buy_price_changed}, Sell price cambió: {sell_price_changed}")
                     else:
                         print("⏭️ Binance P2P COMPLETE rates sin cambios - no se insertan en histórico")
+                        print(f"   Buy price sin cambios, Sell price sin cambios")
                 else:
                     print("💾 Binance P2P COMPLETE rates obtenidos (sin BD en Railway)")
             except Exception as e:
@@ -1644,6 +1686,8 @@ async def compare_rates():
     Comparación de Fuentes
     
     Descripción: Compara cotizaciones entre diferentes fuentes (BCV vs Binance P2P)
+    
+    NOTA: Este endpoint también guarda automáticamente las tasas en rate_history
     """
     try:
         # Obtener datos del BCV
@@ -1676,6 +1720,39 @@ async def compare_rates():
             spread_bcv_binance = bcv_usd - binance_avg
             spread_percentage = (spread_bcv_binance / binance_avg) * 100 if binance_avg > 0 else 0
             
+            # IMPORTANTE: Guardar automáticamente las tasas de comparación en rate_history
+            if DATABASE_AVAILABLE:
+                try:
+                    # Crear estructura de tasas para guardar
+                    comparison_rates = [
+                        {
+                            "exchange_code": "bcv",
+                            "currency_pair": "USD/VES",
+                            "buy_price": bcv_usd,
+                            "sell_price": bcv_usd,
+                            "avg_price": bcv_usd,
+                            "source": "bcv",
+                            "api_method": "web_scraping",
+                            "trade_type": "official"
+                        },
+                        {
+                            "exchange_code": "binance_p2p",
+                            "currency_pair": "USDT/VES",
+                            "buy_price": binance_complete["data"]["buy_usdt"]["price"],
+                            "sell_price": binance_complete["data"]["sell_usdt"]["price"],
+                            "avg_price": binance_avg,
+                            "source": "binance_p2p",
+                            "api_method": "official_api",
+                            "trade_type": "p2p"
+                        }
+                    ]
+                    
+                    await _save_current_rates_to_history(comparison_rates)
+                    print(f"💾 Tasas de comparación guardadas automáticamente en rate_history: {len(comparison_rates)} registros")
+                except Exception as save_error:
+                    print(f"⚠️ Error guardando tasas de comparación en rate_history: {save_error}")
+                    # Continuar sin fallar el endpoint principal
+            
             return {
                 "status": "success",
                 "data": {
@@ -1703,18 +1780,22 @@ async def compare_rates():
                         "spread_percentage": round(spread_percentage, 2),
                         "timestamp": datetime.now().isoformat()
                     }
-                }
+                },
+                "auto_saved_to_history": DATABASE_AVAILABLE,
+                "timestamp": datetime.now().isoformat()
             }
         else:
             return {
                 "status": "error",
                 "error": "No se pudieron obtener todas las cotizaciones",
+                "auto_saved_to_history": False,
                 "timestamp": datetime.now().isoformat()
             }
     except Exception as e:
         return {
             "status": "error",
             "error": f"Error comparando exchanges: {str(e)}",
+            "auto_saved_to_history": False,
             "timestamp": datetime.now().isoformat()
         }
 
@@ -1806,6 +1887,117 @@ async def refresh_rates(exchange_code: str = None):
             "timestamp": datetime.now().isoformat()
         }
 
+@app.get("/api/v1/rates/auto-save-status")
+async def get_auto_save_status():
+    """
+    Estado del guardado automático en rate_history
+    
+    Muestra estadísticas sobre:
+    - Estado del guardado automático
+    - Últimas tasas guardadas
+    - Estadísticas del historial
+    """
+    try:
+        if not DATABASE_AVAILABLE:
+            return {
+                "status": "error",
+                "error": "Base de datos no disponible",
+                "auto_save_enabled": False,
+                "timestamp": datetime.now().isoformat()
+            }
+        
+        # Obtener estadísticas del historial
+        conn = await asyncpg.connect(DATABASE_URL)
+        
+        # Contar total de registros en rate_history
+        total_count = await conn.fetchval("SELECT COUNT(*) FROM rate_history")
+        
+        # Contar registros por exchange
+        exchange_stats = await conn.fetch("""
+            SELECT exchange_code, COUNT(*) as count, 
+                   MAX(timestamp) as last_update,
+                   MIN(timestamp) as first_update
+            FROM rate_history 
+            GROUP BY exchange_code 
+            ORDER BY count DESC
+        """)
+        
+        # Últimos 10 registros
+        latest_records = await conn.fetch("""
+            SELECT exchange_code, currency_pair, avg_price, timestamp, source
+            FROM rate_history 
+            ORDER BY timestamp DESC 
+            LIMIT 10
+        """)
+        
+        # Estadísticas por día (últimos 7 días)
+        daily_stats = await conn.fetch("""
+            SELECT 
+                DATE(timestamp) as date,
+                COUNT(*) as records_count,
+                COUNT(DISTINCT exchange_code) as exchanges_count
+            FROM rate_history 
+            WHERE timestamp >= NOW() - INTERVAL '7 days'
+            GROUP BY DATE(timestamp)
+            ORDER BY date DESC
+        """)
+        
+        await conn.close()
+        
+        # Formatear estadísticas
+        formatted_exchange_stats = []
+        for stat in exchange_stats:
+            formatted_exchange_stats.append({
+                "exchange_code": stat["exchange_code"],
+                "total_records": stat["count"],
+                "last_update": stat["last_update"].isoformat() if stat["last_update"] else None,
+                "first_update": stat["first_update"].isoformat() if stat["first_update"] else None
+            })
+        
+        formatted_latest_records = []
+        for record in latest_records:
+            formatted_latest_records.append({
+                "exchange_code": record["exchange_code"],
+                "currency_pair": record["currency_pair"],
+                "avg_price": float(record["avg_price"]) if record["avg_price"] else None,
+                "timestamp": record["timestamp"].isoformat() if record["timestamp"] else None,
+                "source": record["source"]
+            })
+        
+        formatted_daily_stats = []
+        for stat in daily_stats:
+            formatted_daily_stats.append({
+                "date": stat["date"].isoformat() if stat["date"] else None,
+                "records_count": stat["records_count"],
+                "exchanges_count": stat["exchanges_count"]
+            })
+        
+        return {
+            "status": "success",
+            "data": {
+                "auto_save_enabled": True,
+                "database_available": True,
+                "total_records_in_history": total_count,
+                "exchange_statistics": formatted_exchange_stats,
+                "latest_records": formatted_latest_records,
+                "daily_statistics": formatted_daily_stats,
+                "auto_save_endpoints": [
+                    "/api/v1/rates/current",
+                    "/api/v1/rates/summary", 
+                    "/api/v1/rates/compare"
+                ]
+            },
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        return {
+            "status": "error",
+            "error": f"Error obteniendo estado del guardado automático: {str(e)}",
+            "auto_save_enabled": False,
+            "timestamp": datetime.now().isoformat()
+        }
+
 # ==========================================
 # Configuración de inicio del servidor
 # ==========================================
@@ -1816,7 +2008,7 @@ def get_server_config():
         "host": "0.0.0.0",
         "port": int(os.getenv("PORT", 8000)),
         "reload": False,  # False para producción
-        "log_level": "info"
+        "log_level": "warning" if os.getenv("ENVIRONMENT", "development") == "production" else "info"
     }
 
 def print_startup_info():
@@ -1825,9 +2017,14 @@ def print_startup_info():
     
     print("🚀 Iniciando CrystoDolar Simple Server para Railway...")
     print(f"🔧 Environment: {os.getenv('ENVIRONMENT', 'development')}")
-    print(f"📊 Database URL: {os.getenv('DATABASE_URL', 'not_configured')[:50]}..." if os.getenv("DATABASE_URL") else "📊 Database URL: not_configured")
+    print(f"📊 Database URL: {'configured' if os.getenv('DATABASE_URL') else 'not_configured'}")
     print(f"🌐 Host: {config['host']}")
     print(f"🔌 Port: {config['port']}")
+    
+    # Información adicional para producción
+    if os.getenv("ENVIRONMENT", "development") == "production":
+        print("🛡️ Modo PRODUCCIÓN activado - Endpoints de debug deshabilitados")
+        print("🔒 Información sensible ocultada por seguridad")
 
 if __name__ == "__main__":
     """Ejecutar servidor"""
