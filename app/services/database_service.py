@@ -292,24 +292,157 @@ class DatabaseService:
                 result = await session.execute(stmt)
                 current_rates = result.scalars().all()
                 
-                return [
-                    {
+                rates_with_variation = []
+                for rate in current_rates:
+                    # Calcular variación avanzada con diferentes períodos de tiempo
+                    variation_data = await DatabaseService._calculate_variation_advanced(
+                        session, rate.exchange_code, rate.currency_pair, rate.avg_price
+                    )
+                    
+                    # Formatear variaciones como porcentajes con símbolo %
+                    variation_main_formatted = f"{variation_data['variation_main']:+.2f}%" if variation_data['variation_main'] != 0 else "0.00%"
+                    variation_1h_formatted = f"{variation_data['variation_1h']:+.2f}%" if variation_data['variation_1h'] != 0 else "0.00%"
+                    variation_24h_formatted = f"{variation_data['variation_24h']:+.2f}%" if variation_data['variation_24h'] != 0 else "0.00%"
+                    
+                    rates_with_variation.append({
                         "exchange_code": rate.exchange_code,
                         "currency_pair": rate.currency_pair,
+                        "base_currency": rate.currency_pair_rel.base_currency if rate.currency_pair_rel else None,
+                        "quote_currency": rate.currency_pair_rel.quote_currency if rate.currency_pair_rel else None,
                         "buy_price": rate.buy_price,
                         "sell_price": rate.sell_price,
                         "avg_price": rate.avg_price,
                         "volume_24h": rate.volume_24h,
                         "source": rate.source,
                         "last_update": rate.last_update.isoformat() if rate.last_update else None,
-                        "market_status": rate.market_status
-                    }
-                    for rate in current_rates
-                ]
+                        "market_status": rate.market_status,
+                        "variation_percentage": variation_main_formatted,  # Usar la variación principal (último valor registrado)
+                        "variation_1h": variation_1h_formatted,
+                        "variation_24h": variation_24h_formatted,
+                        "variation_main_raw": variation_data["variation_main"],  # Valor numérico para cálculos
+                        "variation_1h_raw": variation_data["variation_1h"],  # Valor numérico para cálculos
+                        "variation_24h_raw": variation_data["variation_24h"],  # Valor numérico para cálculos
+                        "trend_main": variation_data["trend_main"],  # Tendencia principal
+                        "trend_1h": variation_data["trend_1h"],
+                        "trend_24h": variation_data["trend_24h"]
+                    })
+                
+                return rates_with_variation
                 
         except Exception as e:
             logger.error(f"❌ Error obteniendo current rates: {e}")
             return []
+    
+    @staticmethod
+    async def _calculate_variation_percentage(session, exchange_code: str, currency_pair: str, current_price: float) -> float:
+        """
+        Calcular el porcentaje de variación basado en el último valor de rate_history
+        """
+        try:
+            from sqlalchemy import select, func
+            from app.models.rate_models import RateHistory
+            
+            # Obtener el último precio registrado en rate_history para este exchange y currency_pair
+            stmt = select(RateHistory.avg_price).where(
+                RateHistory.exchange_code == exchange_code,
+                RateHistory.currency_pair == currency_pair
+            ).order_by(RateHistory.timestamp.desc()).limit(1)
+            
+            result = await session.execute(stmt)
+            last_price = result.scalar()
+            
+            if last_price and current_price and last_price > 0:
+                # Calcular variación porcentual
+                variation = ((current_price - last_price) / last_price) * 100
+                return round(variation, 4)
+            else:
+                return 0.0
+                
+        except Exception as e:
+            logger.error(f"❌ Error calculando variación para {exchange_code} {currency_pair}: {e}")
+            return 0.0
+    
+    @staticmethod
+    async def _calculate_variation_advanced(session, exchange_code: str, currency_pair: str, current_price: float) -> dict:
+        """
+        Calcular variación avanzada comparando con el último valor registrado en rate_history
+        """
+        try:
+            from sqlalchemy import select, func
+            from app.models.rate_models import RateHistory
+            from datetime import datetime, timedelta
+            
+            # Obtener el último precio registrado en rate_history para este exchange y currency_pair
+            # Ordenar por timestamp descendente para obtener el más reciente
+            stmt_last = select(RateHistory.avg_price).where(
+                RateHistory.exchange_code == exchange_code,
+                RateHistory.currency_pair == currency_pair
+            ).order_by(RateHistory.timestamp.desc()).limit(1)
+            
+            result_last = await session.execute(stmt_last)
+            last_price = result_last.scalar()
+            
+            # Calcular variación principal (comparando con el último valor registrado)
+            variation_main = 0.0
+            if last_price and current_price and last_price > 0:
+                variation_main = ((current_price - last_price) / last_price) * 100
+                variation_main = round(variation_main, 4)
+            
+            # Para mantener compatibilidad, también calculamos variaciones por tiempo
+            # pero solo si hay datos suficientes
+            now = datetime.utcnow()
+            
+            # Variación en la última hora (si hay datos)
+            one_hour_ago = now - timedelta(hours=1)
+            stmt_1h = select(RateHistory.avg_price).where(
+                RateHistory.exchange_code == exchange_code,
+                RateHistory.currency_pair == currency_pair,
+                RateHistory.timestamp >= one_hour_ago
+            ).order_by(RateHistory.timestamp.desc()).limit(1)
+            
+            result_1h = await session.execute(stmt_1h)
+            price_1h = result_1h.scalar()
+            
+            # Variación en las últimas 24 horas (si hay datos)
+            one_day_ago = now - timedelta(days=1)
+            stmt_24h = select(RateHistory.avg_price).where(
+                RateHistory.exchange_code == exchange_code,
+                RateHistory.currency_pair == currency_pair,
+                RateHistory.timestamp >= one_day_ago
+            ).order_by(RateHistory.timestamp.desc()).limit(1)
+            
+            result_24h = await session.execute(stmt_24h)
+            price_24h = result_24h.scalar()
+            
+            # Calcular variaciones por tiempo
+            variation_1h = 0.0
+            variation_24h = 0.0
+            
+            if price_1h and current_price and price_1h > 0:
+                variation_1h = ((current_price - price_1h) / price_1h) * 100
+                variation_1h = round(variation_1h, 4)
+            
+            if price_24h and current_price and price_24h > 0:
+                variation_24h = ((current_price - price_24h) / price_24h) * 100
+                variation_24h = round(variation_24h, 4)
+            
+            return {
+                "variation_main": variation_main,  # Nueva variación principal
+                "variation_1h": variation_1h,
+                "variation_24h": variation_24h,
+                "trend_main": "up" if variation_main > 0 else "down" if variation_main < 0 else "stable",
+                "trend_1h": "up" if variation_1h > 0 else "down" if variation_1h < 0 else "stable",
+                "trend_24h": "up" if variation_24h > 0 else "down" if variation_24h < 0 else "stable"
+            }
+                
+        except Exception as e:
+            logger.error(f"❌ Error calculando variación avanzada para {exchange_code} {currency_pair}: {e}")
+            return {
+                "variation_1h": 0.0,
+                "variation_24h": 0.0,
+                "trend_1h": "stable",
+                "trend_24h": "stable"
+            }
     
     @staticmethod
     async def log_api_call(
