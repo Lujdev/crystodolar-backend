@@ -1,5 +1,5 @@
 # ==========================================
-# CrystoDolar Backend - Production Requirements
+# CrystoAPIVzla - Production Requirements
 # Solo dependencias esenciales para producción
 # ==========================================
 

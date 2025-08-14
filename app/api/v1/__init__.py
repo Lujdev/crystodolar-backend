@@ -1,6 +1,6 @@
 """
 API v1 Router
-Endpoints para CrystoDolar
+Endpoints para CrystoAPIVzla
 """
 
 from fastapi import APIRouter

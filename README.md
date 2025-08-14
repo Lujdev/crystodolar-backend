@@ -1,4 +1,4 @@
-# 🚀 CrystoDolar API
+# 🚀 CrystoAPIVzla
 
 API para cotizaciones USDT/VES en tiempo real con guardado automático en base de datos.
 
@@ -13,7 +13,7 @@ API para cotizaciones USDT/VES en tiempo real con guardado automático en base d
 ## 🏗️ Estructura del Proyecto
 
 ```
-crystodolar-backend/
+crystoapivzla/
 ├── app/
 │   ├── api/v1/endpoints/     # Endpoints de la API
 │   ├── core/                 # Configuración y base de datos
@@ -29,7 +29,7 @@ crystodolar-backend/
 ```bash
 # Clonar repositorio
 git clone <repository-url>
-cd crystodolar-backend
+cd crystoapivzla
 
 # Instalar dependencias
 pip install -r requirements.txt
@@ -68,7 +68,7 @@ Información básica de la API.
 {
   "status": "success",
   "data": {
-    "message": "CrystoDolar API Simple",
+    "message": "CrystoAPIVzla Simple",
     "version": "1.0.0",
     "description": "Cotizaciones USDT/VES en tiempo real",
     "sources": ["BCV", "Binance P2P"],
@@ -89,7 +89,7 @@ Health check para Railway.
   "status": "success",
   "data": {
     "status": "healthy",
-    "service": "crystodolar-backend",
+    "service": "crystoapivzla",
     "message": "Service is running",
     "environment": "production",
     "database_url": "configured"
@@ -106,7 +106,7 @@ Estado del sistema.
 {
   "status": "success",
   "data": {
-    "service": "crystodolar-backend",
+    "service": "crystoapivzla",
     "version": "1.0.0",
     "environment": "production",
     "database_configured": true
@@ -441,7 +441,22 @@ Todas las respuestas incluyen:
 
 ## 📝 Licencia
 
-Este proyecto está bajo la licencia MIT.
+Este proyecto está bajo la **Licencia Apache 2.0**. Ver el archivo [LICENSE](LICENSE) para más detalles.
+
+### Información de Licencia
+
+- **Tipo**: Licencia Apache 2.0
+- **Protección**: Incluye protección de patentes
+- **Uso**: Permite uso comercial, modificación y distribución
+- **Requisitos**: Mantener archivo LICENSE y NOTICE
+- **Atribución**: Incluir copyright y avisos de licencia
+
+### Archivos de Licencia
+
+- `LICENSE` - Texto completo de la licencia Apache 2.0
+- `NOTICE` - Atribuciones y avisos legales
+
+Para más información sobre la licencia Apache 2.0, visita: https://www.apache.org/licenses/LICENSE-2.0
 
 ## 🤝 Contribuciones
 

@@ -1,10 +1,24 @@
 #!/usr/bin/env python3
 """
-CrystoDolar - Servidor Simple para Railway
+CrystoAPIVzla - Servidor Simple para Railway
 Versión de PRODUCCIÓN - Optimizada y segura
 
 API para cotizaciones USDT/VES en tiempo real con guardado automático en rate_history.
 Endpoints principales: /rates/current, /rates/summary, /rates/compare
+
+Copyright 2024 CrystoAPIVzla Team
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
 """
 
 import os
@@ -28,7 +42,7 @@ from app.services.database_service import DatabaseService
 
 # Configuración de la aplicación
 APP_CONFIG = {
-    "title": "CrystoDolar API Simple",
+    "title": "CrystoAPIVzla API Simple",
     "description": "API simplificada para cotizaciones USDT/VES",
     "version": "1.0.0",
     "docs_url": "/docs",
@@ -279,7 +293,7 @@ async def root():
     return create_response(
         status="success",
         data={
-            "message": "CrystoDolar API Simple",
+            "message": "CrystoAPIVzla API Simple",
             "version": "1.0.0",
             "description": "Cotizaciones USDT/VES en tiempo real",
             "sources": ["BCV", "Binance P2P"],
@@ -297,7 +311,7 @@ async def health_check():
             status="success",
             data={
                 "status": "healthy",
-                "service": "crystodolar-backend",
+                "service": "crystoapivzla",
                 "message": "Service is running",
                 "environment": os.getenv("ENVIRONMENT", "development"),
                 "database_url": "configured" if os.getenv("DATABASE_URL") else "not_configured"
@@ -315,7 +329,7 @@ async def get_status():
     return create_response(
         status="success",
         data={
-            "service": "crystodolar-backend",
+            "service": "crystoapivzla",
             "version": "1.0.0",
             "environment": os.getenv("ENVIRONMENT", "development"),
             "database_configured": bool(os.getenv("DATABASE_URL"))
@@ -1905,7 +1919,7 @@ def print_startup_info():
     """Imprimir información de inicio del servidor."""
     config = get_server_config()
     
-    print("🚀 Iniciando CrystoDolar Simple Server para Railway...")
+    print("🚀 Iniciando CrystoAPIVzla Simple Server para Railway...")
     print(f"🔧 Environment: {os.getenv('ENVIRONMENT', 'development')}")
     print(f"📊 Database URL: {'configured' if os.getenv('DATABASE_URL') else 'not_configured'}")
     print(f"🌐 Host: {config['host']}")

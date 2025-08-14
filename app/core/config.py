@@ -15,9 +15,9 @@ class Settings(BaseSettings):
     """
     
     # Database (Neon.tech)
-    DATABASE_URL: str = "postgresql://localhost/crystodolar"
+    DATABASE_URL: str = "postgresql://localhost/crystoapivzla"
     NEON_ENDPOINT: Optional[str] = None
-    NEON_DATABASE: str = "crystodolar"
+    NEON_DATABASE: str = "crystoapivzla"
     NEON_USERNAME: Optional[str] = None
     NEON_PASSWORD: Optional[str] = None
     
@@ -53,8 +53,8 @@ class Settings(BaseSettings):
     CORS_ORIGINS: List[str] = [
         "http://localhost:3000",
         "http://localhost:3001",
-        "https://crystodolar.com",
-        "https://www.crystodolar.com"
+        "https://crystoapivzla.com",
+"https://www.crystoapivzla.com"
     ]
     CORS_ALLOW_CREDENTIALS: bool = True
     

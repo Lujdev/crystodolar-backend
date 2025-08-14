@@ -29,7 +29,7 @@ engine = create_async_engine(
     # Configuración específica para Neon.tech y asyncpg
     connect_args={
         "server_settings": {
-            "application_name": "crystodolar_api",
+            "application_name": "crystoapivzla_api",
         }
     }
 )
