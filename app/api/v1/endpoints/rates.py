@@ -46,15 +46,63 @@ async def get_current_rates(
 
 
 @router.get("/scrape-bcv")
-async def scrape_bcv_live():
+async def scrape_bcv_live(
+    db: AsyncSession = Depends(get_db_session)
+):
     """
     Hacer scraping en tiempo real del BCV
     
     Endpoint para probar el web scraping del Banco Central de Venezuela
     Retorna las cotizaciones del dólar y euro obtenidas directamente del sitio web
+    Incluye exchange_code de current_rates y base_currency de currency_pairs
     """
     try:
+        # Obtener datos del scraping del BCV
         result = await scrape_bcv_rates()
+        
+        # Si el scraping fue exitoso, obtener información adicional de la BD
+        if result.get("status") == "success":
+            try:
+                # Consultar exchange_code desde current_rates y base_currency desde currency_pairs
+                from sqlalchemy import select
+                from app.models.rate_models import CurrentRate
+                from app.models.exchange_models import CurrencyPair
+                
+                # Buscar el exchange_code para BCV en current_rates
+                stmt_current = select(CurrentRate.exchange_code).where(
+                    CurrentRate.exchange_code == "bcv"
+                ).limit(1)
+                
+                # Buscar el base_currency para USD/VES en currency_pairs
+                stmt_currency = select(CurrencyPair.base_currency).where(
+                    CurrencyPair.symbol == "USD/VES"
+                ).limit(1)
+                
+                # Ejecutar consultas
+                result_current = await db.execute(stmt_current)
+                result_currency = await db.execute(stmt_currency)
+                
+                exchange_code = result_current.scalar()
+                base_currency = result_currency.scalar()
+                
+                # Agregar la información de la BD al resultado
+                if result.get("data"):
+                    result["data"]["exchange_code"] = exchange_code
+                    result["data"]["base_currency"] = base_currency
+                    result["data"]["database_info"] = {
+                        "exchange_code": exchange_code,
+                        "base_currency": base_currency,
+                        "source": "database"
+                    }
+                
+            except Exception as db_error:
+                # Si hay error en la BD, continuar sin esa información
+                if result.get("data"):
+                    result["data"]["database_info"] = {
+                        "error": f"Error consultando BD: {str(db_error)}",
+                        "source": "scraping_only"
+                    }
+        
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error en scraping del BCV: {str(e)}")

@@ -32,6 +32,9 @@ __pycache__/
 htmlcov/
 .coverage
 
+#rulesEditor
+.cursor/
+
 # Dependencias de paquetes
 /dist/
 /build/
