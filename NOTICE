@@ -1,0 +1,13 @@
+CrystoAPIVzla
+Copyright 2025 CrystoAPIVzla Team
+
+This product includes software developed by:
+- CrystoAPIVzla Team (https://github.com/Lujdev/crystoapivzla)
+
+Additional third-party components and their licenses:
+- FastAPI (https://fastapi.tiangolo.com/) - MIT License
+- SQLAlchemy (https://www.sqlalchemy.org/) - MIT License
+- PostgreSQL (https://www.postgresql.org/) - PostgreSQL License
+- Neon Database (https://neon.tech/) - Proprietary (Terms of Service)
+
+For full license information, see the LICENSE file.

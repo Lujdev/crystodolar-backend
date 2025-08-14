@@ -1,5 +1,5 @@
 """
-Modelos SQLAlchemy para CrystoDolar
+Modelos SQLAlchemy para CrystoAPIVzla
 """
 
 from .rate_models import RateHistory, CurrentRate

@@ -1,10 +1,10 @@
-# 🚀 CrystoDolar - Setup con Neon.tech
+# 🚀 CrystoAPIVzla - Setup con Neon.tech
 
 ## 📋 **Instrucciones de configuración**
 
 ### 1. **Crear proyecto en Neon.tech**
 1. Ve a [neon.tech](https://neon.tech) y crea una cuenta
-2. Crear nuevo proyecto: **crystodolar**
+2. Crear nuevo proyecto: **crystoapivzla**
 3. Seleccionar región más cercana (US East para mejor latencia desde Venezuela)
 4. Copiar la cadena de conexión
 
@@ -14,7 +14,7 @@
 psql "postgresql://[user]:[password]@[endpoint]/[dbname]?sslmode=require"
 
 # O ejecutar directamente el archivo
-psql "postgresql://[connection_string]" -f database/crystodolar_schema.sql
+psql "postgresql://[connection_string]" -f database/crystoapivzla_schema.sql
 ```
 
 ### 3. **Variables de entorno para FastAPI**
@@ -101,7 +101,7 @@ async def websocket_endpoint(websocket: WebSocket):
     # Enviar updates en tiempo real
 ```
 
-## 🎯 **Ventajas de Neon.tech para CrystoDolar**
+## 🎯 **Ventajas de Neon.tech para CrystoAPIVzla**
 
 ### ✅ **Pros:**
 - **Branching**: Crear ramas de BD para testing
@@ -141,7 +141,7 @@ WHERE schemaname = 'public';
 
 ## 📝 **Próximos pasos**
 
-1. ✅ Ejecutar `crystodolar_schema.sql` en Neon
+1. ✅ Ejecutar `crystoapivzla_schema.sql` en Neon
 2. 🔄 Crear proyecto FastAPI 
 3. 🔄 Implementar scraping de BCV y Binance
 4. 🔄 Crear endpoints de API

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-CrystoDolar - Servidor Simple
+CrystoAPIVzla - Servidor Simple
 FastAPI + Neon.tech PostgreSQL
 Versión simplificada para testing
 """
@@ -22,7 +22,7 @@ logger.remove()  # Remover configuración por defecto
 logger.add(sys.stdout, format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>")
 
 # Logs a archivo (todos los niveles)
-logger.add("logs/crystodolar.log", 
+logger.add("logs/crystoapivzla.log", 
           format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} - {message}",
           rotation="1 day",  # Rotar cada día
           retention="30 days",  # Mantener 30 días
@@ -52,7 +52,7 @@ load_dotenv()
 
 # Crear instancia de FastAPI
 app = FastAPI(
-    title="CrystoDolar API Simple",
+    title="CrystoAPIVzla API Simple",
     description="API simplificada para cotizaciones USDT/VES",
     version="1.0.0",
     docs_url="/docs",
@@ -76,7 +76,7 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 async def root():
     """Endpoint raíz"""
     return {
-        "message": "CrystoDolar API Simple",
+        "message": "CrystoAPIVzla API Simple",
         "version": "1.0.0",
         "description": "Cotizaciones USDT/VES en tiempo real",
         "sources": ["BCV", "Binance P2P"],
@@ -92,7 +92,7 @@ async def health_check():
         # Health check básico sin verificar BD
         return {
             "status": "healthy",
-            "service": "crystodolar-backend",
+            "service": "crystoapivzla",
             "timestamp": datetime.now().isoformat(),
             "message": "Service is running"
         }
@@ -486,7 +486,7 @@ async def get_database_stats():
 
 if __name__ == "__main__":
     """Ejecutar servidor"""
-    logger.info("🚀 Iniciando CrystoDolar Simple Server...")
+    logger.info("🚀 Iniciando CrystoAPIVzla Simple Server...")
     logger.info(f"📊 Database URL: {DATABASE_URL[:50]}...")
     
     # Usar variable de entorno PORT para Railway, o 8000 por defecto

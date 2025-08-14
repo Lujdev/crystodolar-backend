@@ -1,5 +1,5 @@
 -- ========================================
--- CrystoDolar - Estructura de Base de Datos
+-- CrystoAPIVzla - Estructura de Base de Datos
 -- FastAPI + Neon.tech
 -- ========================================
 
@@ -326,7 +326,7 @@ END $$;
 -- COMENTARIOS FINALES
 -- ========================================
 
--- COMMENT ON DATABASE postgres IS 'CrystoDolar - Base de datos para cotizaciones USDT/VES';
+-- COMMENT ON DATABASE postgres IS 'CrystoAPIVzla - Base de datos para cotizaciones USDT/VES';
 -- Nota: El comando COMMENT ON DATABASE puede requerir permisos especiales en Neon.tech
 COMMENT ON TABLE exchanges IS 'Fuentes de datos de cotizaciones (BCV, Binance, etc.)';
 COMMENT ON TABLE currency_pairs IS 'Pares de monedas soportados';
@@ -346,6 +346,6 @@ CREATE TABLE IF NOT EXISTS schema_version (
 );
 
 INSERT INTO schema_version (version, description) VALUES 
-('1.0.0', 'Schema inicial de CrystoDolar con soporte para BCV y Binance P2P');
+('1.0.0', 'Schema inicial de CrystoAPIVzla con soporte para BCV y Binance P2P');
 
 -- Fin del archivo

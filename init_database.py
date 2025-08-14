@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Script para inicializar la base de datos de CrystoDolar
+Script para inicializar la base de datos de CrystoAPIVzla
 Ejecutar: python3.12 init_database.py
 """
 
