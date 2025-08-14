@@ -3,28 +3,8 @@
 CrystoDolar - Servidor Simple para Railway
 Versión de PRODUCCIÓN - Optimizada y segura
 
-FUNCIONALIDAD DE GUARDADO AUTOMÁTICO:
-=====================================
-Este servidor incluye guardado automático en rate_history para los siguientes endpoints:
-
-✅ /api/v1/rates/current - Guarda automáticamente todas las tasas obtenidas
-✅ /api/v1/rates/summary - Guarda automáticamente las tasas del resumen
-✅ /api/v1/rates/compare - Guarda automáticamente las tasas de comparación
-
-CARACTERÍSTICAS:
-- Guardado inteligente: Solo inserta si hay cambios significativos
-- Evita duplicados innecesarios
-- Mantiene consistencia con DatabaseService existente
-- Logs detallados del proceso de guardado
-- Endpoint de monitoreo: /api/v1/rates/auto-save-status
-- Endpoints de debug eliminados para seguridad en producción
-
-BENEFICIOS:
-- Historial completo de todas las consultas
-- Datos para análisis de tendencias
-- Gráficas históricas más precisas
-- Monitoreo del comportamiento del mercado
-- Seguridad mejorada para entornos de producción
+API para cotizaciones USDT/VES en tiempo real con guardado automático en rate_history.
+Endpoints principales: /rates/current, /rates/summary, /rates/compare
 """
 
 import os
@@ -106,7 +86,7 @@ EUR_PATTERNS = [
 # ==========================================
 
 def load_environment():
-    """Cargar variables de entorno desde .env"""
+    """Cargar variables de entorno desde .env."""
     try:
         from dotenv import load_dotenv
         load_dotenv()
@@ -116,7 +96,7 @@ def load_environment():
         _load_env_manually()
 
 def _load_env_manually():
-    """Carga manual del archivo .env como fallback"""
+    """Carga manual del archivo .env como fallback."""
     try:
         if os.path.exists('.env'):
             with open('.env', 'r') as f:
@@ -141,7 +121,7 @@ ASYNCPG_AVAILABLE = False
 DATABASE_URL = None
 
 def check_dependencies():
-    """Verificar disponibilidad de dependencias"""
+    """Verificar disponibilidad de dependencias."""
     global DATABASE_AVAILABLE, ASYNCPG_AVAILABLE, DATABASE_URL
     
     # Verificar DatabaseService
@@ -182,18 +162,7 @@ check_dependencies()
 # ==========================================
 
 async def check_rate_changed(exchange_code: str, currency_pair: str, new_price: float, tolerance: float = 0.0001) -> bool:
-    """
-    Verificar si una tasa específica cambió significativamente para evitar duplicados
-    
-    Args:
-        exchange_code: Código del exchange (BCV, BINANCE_P2P, etc.)
-        currency_pair: Par de monedas (USD/VES, USDT/VES, etc.)
-        new_price: Nuevo precio a verificar
-        tolerance: Tolerancia en porcentaje (0.01% por defecto = cambios de 2 decimales)
-    
-    Returns:
-        bool: True si hay cambios significativos, False si no hay cambios
-    """
+    """Verificar si una tasa cambió significativamente para evitar duplicados."""
     if not DATABASE_AVAILABLE:
         return True  # Si no hay BD, siempre insertar
     
@@ -272,7 +241,7 @@ warnings.filterwarnings('ignore', message='Unverified HTTPS request')
 # ==========================================
 
 def create_response(status: str, data: Any = None, error: str = None, **kwargs) -> Dict[str, Any]:
-    """Crear respuesta estándar para la API"""
+    """Crear respuesta estándar para la API."""
     response = {
         "status": status,
         "timestamp": datetime.now().isoformat()
@@ -306,7 +275,7 @@ app.add_middleware(
 
 @app.get("/")
 async def root():
-    """Endpoint raíz"""
+    """Endpoint raíz de la API."""
     return create_response(
         status="success",
         data={
@@ -322,7 +291,7 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    """Health check simple para Railway"""
+    """Health check para Railway."""
     try:
         return create_response(
             status="success",
@@ -342,7 +311,7 @@ async def health_check():
 
 @app.get("/api/v1/status")
 async def get_status():
-    """Endpoint de estado del sistema"""
+    """Estado del sistema."""
     return create_response(
         status="success",
         data={
@@ -355,7 +324,7 @@ async def get_status():
 
 @app.get("/api/v1/config")
 async def get_config():
-    """Endpoint para ver configuración (sin secretos)"""
+    """Configuración del sistema (sin secretos)."""
     return create_response(
         status="success",
         data={
@@ -385,7 +354,7 @@ async def get_config():
 # ==========================================
 
 async def scrape_bcv_simple():
-    """Scraping simplificado del BCV sin dependencias complejas"""
+    """Scraping del BCV para obtener tasas USD/VES y EUR/VES."""
     try:
         import httpx
         from bs4 import BeautifulSoup
@@ -465,7 +434,7 @@ async def scrape_bcv_simple():
         )
 
 def _extract_rate_from_selectors(soup, selectors: List[str]) -> float:
-    """Extraer tasa usando selectores CSS"""
+    """Extraer tasa usando selectores CSS."""
     for selector in selectors:
         try:
             element = soup.select_one(selector)
@@ -479,7 +448,7 @@ def _extract_rate_from_selectors(soup, selectors: List[str]) -> float:
     return 0
 
 def _extract_rate_from_patterns(text: str, patterns: List[str]) -> float:
-    """Extraer tasa usando patrones regex"""
+    """Extraer tasa usando patrones regex."""
     for pattern in patterns:
         match = re.search(pattern, text, re.IGNORECASE)
         if match:
@@ -487,7 +456,7 @@ def _extract_rate_from_patterns(text: str, patterns: List[str]) -> float:
     return 0
 
 async def _save_bcv_rates_if_changed(usd_ves: float, eur_ves: float, final_url: str):
-    """Guardar tasas BCV si cambiaron"""
+    """Guardar tasas BCV si cambiaron."""
     try:
         # Verificar USD/VES
         usd_changed = await check_rate_changed("BCV", "USD/VES", usd_ves)
@@ -542,13 +511,13 @@ async def _save_bcv_rates_if_changed(usd_ves: float, eur_ves: float, final_url: 
 # ==========================================
 
 class RatesService:
-    """Servicio para manejar cotizaciones con base de datos"""
+    """Servicio para manejar cotizaciones con base de datos."""
     
     def __init__(self, db_session=None):
         self.db = db_session
     
     async def get_current_rates(self, exchange_code=None, currency_pair=None):
-        """Obtener cotizaciones actuales"""
+        """Obtener cotizaciones actuales."""
         try:
             # Por ahora, obtener datos en tiempo real
             if exchange_code == "bcv" or exchange_code is None:
@@ -826,7 +795,7 @@ class RatesService:
             return []
     
     async def get_market_summary(self):
-        """Resumen del mercado USDT/VES"""
+        """Resumen del mercado USDT/VES."""
         try:
             rates = await self.get_current_rates()
             
@@ -864,7 +833,7 @@ class RatesService:
             }
     
     async def compare_exchanges(self, currency_pair="USDT/VES"):
-        """Comparar cotizaciones entre exchanges"""
+        """Comparar cotizaciones entre exchanges."""
         try:
             rates = await self.get_current_rates()
             
@@ -908,15 +877,7 @@ async def get_current_rates(
     exchange_code: str = None,
     currency_pair: str = None
 ):
-    """
-    Obtener cotizaciones actuales de USDT/VES
-    
-    - **exchange_code**: Filtrar por exchange (bcv, binance_p2p)
-    - **currency_pair**: Filtrar por par de monedas
-    
-    NOTA: Este endpoint automáticamente guarda las tasas obtenidas en rate_history
-    para mantener un historial completo de todas las consultas.
-    """
+    """Obtener cotizaciones actuales de USDT/VES con guardado automático en rate_history."""
     # Siempre obtener datos en tiempo real para incluir variaciones calculadas
     try:
         rates = await rates_service.get_current_rates(
@@ -977,16 +938,7 @@ async def get_current_rates(
         }
 
 async def _save_current_rates_to_history(rates: List[Dict[str, Any]]) -> None:
-    """
-    Guardar automáticamente las tasas actuales en rate_history
-    
-    Esta función se ejecuta cada vez que se llama a /api/v1/rates/current
-    para mantener un historial completo de todas las consultas.
-    
-    NOTA: Binance P2P ya se guarda automáticamente en get_binance_p2p_complete(),
-    por lo que esta función solo debe recibir tasas de otros exchanges para evitar
-    duplicados en rate_history.
-    """
+    """Guardar tasas actuales en rate_history (excluyendo Binance P2P para evitar duplicados)."""
     if not rates or not DATABASE_AVAILABLE:
         return
     
@@ -1018,11 +970,7 @@ async def _save_current_rates_to_history(rates: List[Dict[str, Any]]) -> None:
         print(f"❌ Error general guardando tasas en rate_history: {e}")
 
 async def _should_insert_rate_to_history(rate: Dict[str, Any]) -> bool:
-    """
-    Determinar si una tasa debe ser insertada en rate_history
-    
-    Evita duplicados innecesarios verificando si hay cambios significativos
-    """
+    """Determinar si una tasa debe ser insertada en rate_history."""
     try:
         exchange_code = rate.get('exchange_code')
         currency_pair = rate.get('currency_pair')
@@ -1039,11 +987,7 @@ async def _should_insert_rate_to_history(rate: Dict[str, Any]) -> bool:
         return True  # En caso de error, insertar por seguridad
 
 async def _insert_single_rate_to_history(rate: Dict[str, Any]) -> None:
-    """
-    Insertar una sola tasa en rate_history
-    
-    Usa el DatabaseService existente para mantener consistencia
-    """
+    """Insertar una tasa en rate_history usando DatabaseService."""
     try:
         exchange_code = rate.get('exchange_code')
         currency_pair = rate.get('currency_pair')
@@ -1113,9 +1057,7 @@ async def _insert_generic_rate_to_history(
     api_method: str, 
     trade_type: str
 ) -> None:
-    """
-    Insertar tasa genérica en rate_history para exchanges no específicos
-    """
+    """Insertar tasa genérica en rate_history para exchanges no específicos."""
     try:
         async for session in get_db_session():
             from app.models.rate_models import RateHistory
@@ -1143,7 +1085,7 @@ async def _insert_generic_rate_to_history(
 
 @app.get("/api/v1/rates/history")
 async def get_all_rate_history(limit: int = 100):
-    """Obtener histórico general desde la base de datos"""
+    """Obtener histórico general desde la base de datos."""
     if not DATABASE_AVAILABLE:
         return {
             "status": "error",
@@ -1175,17 +1117,7 @@ async def get_all_rate_history(limit: int = 100):
 
 @app.get("/api/v1/rates/summary")
 async def get_market_summary():
-    """
-    Resumen del mercado USDT/VES
-    
-    Incluye:
-    - Todas las cotizaciones actuales
-    - Spread entre BCV y Binance P2P
-    - Variaciones 24h
-    - Estado del mercado
-    
-    NOTA: Este endpoint también guarda automáticamente las tasas en rate_history
-    """
+    """Resumen del mercado USDT/VES con guardado automático en rate_history."""
     try:
         summary = await rates_service.get_market_summary()
         
@@ -1214,7 +1146,7 @@ async def get_market_summary():
 
 @app.get("/api/v1/rates/binance-p2p")
 async def get_binance_p2p_rates():
-    """Cotizaciones Binance P2P en tiempo real"""
+    """Cotizaciones Binance P2P en tiempo real."""
     try:
         # Usar binance_complete para obtener datos unificados
         result = await get_binance_p2p_complete()
@@ -1234,11 +1166,7 @@ async def get_binance_p2p_rates():
 
 @app.get("/api/v1/rates/binance-p2p/sell")
 async def get_binance_p2p_sell_rates():
-    """
-    Precios de Venta de USDT (Comprar USDT con VES)
-    
-    Descripción: Obtiene el mejor precio para comprar USDT con VES
-    """
+    """Precios de venta de USDT (comprar USDT con VES)."""
     try:
         # Usar binance_complete para obtener datos unificados
         result = await get_binance_p2p_complete()
@@ -1258,11 +1186,7 @@ async def get_binance_p2p_sell_rates():
 
 @app.get("/api/v1/rates/binance")
 async def get_binance_rate():
-    """
-    Obtener cotización de Binance P2P Venezuela
-    
-    Mercado crypto peer-to-peer
-    """
+    """Cotización de Binance P2P Venezuela (mercado crypto peer-to-peer)."""
     try:
         # Usar binance_complete para obtener datos unificados
         binance_data = await get_binance_p2p_complete()
@@ -1301,7 +1225,7 @@ async def get_binance_rate():
         }
 
 async def _fetch_binance_p2p_direct(trade_type: str):
-    """Obtener precios de Binance P2P directamente de la API - SIN guardar en BD"""
+    """Obtener precios de Binance P2P directamente de la API (sin guardar en BD)."""
     try:
         import httpx
         
@@ -1422,9 +1346,7 @@ async def _fetch_binance_p2p_direct(trade_type: str):
 
 @app.get("/api/v1/rates/binance-p2p/complete")
 async def get_binance_p2p_complete():
-    """
-    Obtener tanto precios de compra como de venta de USDT/VES en Binance P2P
-    """
+    """Obtener precios de compra y venta de USDT/VES en Binance P2P."""
     try:
         print("🟡 Obteniendo precios completos de Binance P2P...")
         
@@ -1532,11 +1454,7 @@ async def get_binance_p2p_complete():
 
 @app.get("/api/v1/rates/scrape-bcv")
 async def scrape_bcv_live():
-    """
-    Scraping en tiempo real del BCV
-    
-    Incluye información de exchange_code de current_rates y base_currency de currency_pairs
-    """
+    """Scraping en tiempo real del BCV."""
     try:
         result = await scrape_bcv_simple()
         
@@ -1608,11 +1526,7 @@ async def scrape_bcv_live():
 
 @app.get("/api/v1/rates/bcv")
 async def get_bcv_rate():
-    """
-    Obtener cotización oficial del BCV
-    
-    Tasa oficial del Banco Central de Venezuela
-    """
+    """Cotización oficial del BCV (Banco Central de Venezuela)."""
     try:
         bcv_data = await scrape_bcv_simple()
         if bcv_data["status"] == "success":
@@ -1658,7 +1572,7 @@ async def get_bcv_rate():
 
 @app.get("/api/v1/exchanges")
 async def get_exchanges():
-    """Lista de exchanges disponibles"""
+    """Lista de exchanges disponibles."""
     return {
         "status": "success",
         "data": [
@@ -1682,13 +1596,7 @@ async def get_exchanges():
 
 @app.get("/api/v1/rates/compare")
 async def compare_rates():
-    """
-    Comparación de Fuentes
-    
-    Descripción: Compara cotizaciones entre diferentes fuentes (BCV vs Binance P2P)
-    
-    NOTA: Este endpoint también guarda automáticamente las tasas en rate_history
-    """
+    """Comparar cotizaciones entre BCV y Binance P2P con guardado automático en rate_history."""
     try:
         # Obtener datos del BCV
         bcv_data = await scrape_bcv_simple()
@@ -1801,14 +1709,7 @@ async def compare_rates():
 
 @app.get("/api/v1/rates/status")
 async def get_rates_status():
-    """
-    Estado de las cotizaciones y fuentes de datos
-    
-    Información útil para monitoreo:
-    - Última actualización por exchange
-    - Estado de conexión a APIs externas
-    - Número de cotizaciones disponibles
-    """
+    """Estado de las cotizaciones y fuentes de datos."""
     try:
         rates = await rates_service.get_current_rates()
         
@@ -1848,11 +1749,7 @@ async def get_rates_status():
 
 @app.post("/api/v1/rates/refresh")
 async def refresh_rates(exchange_code: str = None):
-    """
-    Forzar actualización de cotizaciones
-    
-    Útil para refrescar datos manualmente
-    """
+    """Forzar actualización de cotizaciones."""
     try:
         # Forzar actualización de datos
         if exchange_code == "bcv" or exchange_code is None:
@@ -1889,14 +1786,7 @@ async def refresh_rates(exchange_code: str = None):
 
 @app.get("/api/v1/rates/auto-save-status")
 async def get_auto_save_status():
-    """
-    Estado del guardado automático en rate_history
-    
-    Muestra estadísticas sobre:
-    - Estado del guardado automático
-    - Últimas tasas guardadas
-    - Estadísticas del historial
-    """
+    """Estado del guardado automático en rate_history."""
     try:
         if not DATABASE_AVAILABLE:
             return {
@@ -2003,7 +1893,7 @@ async def get_auto_save_status():
 # ==========================================
 
 def get_server_config():
-    """Obtener configuración del servidor"""
+    """Obtener configuración del servidor."""
     return {
         "host": "0.0.0.0",
         "port": int(os.getenv("PORT", 8000)),
@@ -2012,7 +1902,7 @@ def get_server_config():
     }
 
 def print_startup_info():
-    """Imprimir información de inicio del servidor"""
+    """Imprimir información de inicio del servidor."""
     config = get_server_config()
     
     print("🚀 Iniciando CrystoDolar Simple Server para Railway...")
@@ -2027,7 +1917,7 @@ def print_startup_info():
         print("🔒 Información sensible ocultada por seguridad")
 
 if __name__ == "__main__":
-    """Ejecutar servidor"""
+    """Ejecutar servidor."""
     print_startup_info()
     
     config = get_server_config()
