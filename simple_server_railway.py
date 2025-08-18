@@ -742,21 +742,31 @@ class RatesService:
                     try:
                         conn = await asyncpg.connect(DATABASE_URL)
                         
-                        # Obtener el último precio registrado en rate_history para Binance P2P USDT/VES
+                        # Obtener los dos últimos precios registrados en rate_history para Binance P2P USDT/VES
                         query = """
                             SELECT avg_price FROM rate_history 
                             WHERE exchange_code = 'BINANCE_P2P' AND currency_pair = 'USDT/VES'
-                            ORDER BY timestamp DESC LIMIT 1
+                            ORDER BY timestamp DESC LIMIT 2
                         """
                         
-                        last_price_row = await conn.fetchrow(query)
+                        price_rows = await conn.fetch(query)
                         
-                        if last_price_row and last_price_row['avg_price'] > 0:
+                        if len(price_rows) >= 2:
                             current_price = binance_data["data"]["usdt_ves_avg"]
-                            last_price = last_price_row['avg_price']
-                            variation_raw = ((current_price - last_price) / last_price) * 100
-                            variation_percentage = f"{variation_raw:+.2f}%" if variation_raw != 0 else "0.00%"
-                            trend_main = "up" if variation_raw > 0 else "down" if variation_raw < 0 else "stable"
+                            last_price = float(price_rows[0]['avg_price'])
+                            second_last_price = float(price_rows[1]['avg_price'])
+                            
+                            # Calcular variación entre último y penúltimo valor histórico
+                            if second_last_price > 0:
+                                variation_raw = ((last_price - second_last_price) / second_last_price) * 100
+                                variation_percentage = f"{variation_raw:+.2f}%" if variation_raw != 0 else "0.00%"
+                                trend_main = "up" if variation_raw > 0 else "down" if variation_raw < 0 else "stable"
+                            else:
+                                variation_percentage = "0.00%"
+                                trend_main = "stable"
+                        else:
+                            variation_percentage = "0.00%"
+                            trend_main = "stable"
                         
                         await conn.close()
                     except Exception as e:

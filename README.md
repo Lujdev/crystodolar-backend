@@ -10,6 +10,17 @@ API para cotizaciones USDT/VES en tiempo real con guardado automático en base d
 - **Variaciones y tendencias** calculadas automáticamente
 - **Optimizado para Railway** con configuración de producción
 
+## 📊 Cálculo de Variaciones
+
+El sistema calcula automáticamente las variaciones porcentuales para cada cotización:
+
+- **variation_percentage**: Diferencia entre los dos últimos precios registrados.
+- **variation_1h**: Variación en la última hora
+- **variation_24h**: Variación en las últimas 24 horas
+- **trend_main**: Tendencia general (up/down/stable) basada en la variación principal
+- **trend_1h**: Tendencia en la última hora
+- **trend_24h**: Tendencia en las últimas 24 horas
+
 ## 🏗️ Estructura del Proyecto
 
 ```

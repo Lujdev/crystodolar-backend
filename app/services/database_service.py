@@ -336,27 +336,31 @@ class DatabaseService:
     @staticmethod
     async def _calculate_variation_percentage(session, exchange_code: str, currency_pair: str, current_price: float) -> float:
         """
-        Calcular el porcentaje de variación basado en el último valor de rate_history
+        Calcular el porcentaje de variación basado en la diferencia entre los dos últimos valores de rate_history
         """
         try:
             from sqlalchemy import select, func
             from app.models.rate_models import RateHistory
             
-            # Obtener el último precio registrado en rate_history para este exchange y currency_pair
+            # Obtener los dos últimos precios registrados en rate_history para este exchange y currency_pair
             stmt = select(RateHistory.avg_price).where(
                 RateHistory.exchange_code == exchange_code,
                 RateHistory.currency_pair == currency_pair
-            ).order_by(RateHistory.timestamp.desc()).limit(1)
+            ).order_by(RateHistory.timestamp.desc()).limit(2)
             
             result = await session.execute(stmt)
-            last_price = result.scalar()
+            price_rows = result.fetchall()
             
-            if last_price and current_price and last_price > 0:
-                # Calcular variación porcentual
-                variation = ((current_price - last_price) / last_price) * 100
-                return round(variation, 4)
-            else:
-                return 0.0
+            if len(price_rows) >= 2:
+                last_price = float(price_rows[0][0])  # Primer precio (más reciente)
+                second_last_price = float(price_rows[1][0])  # Segundo precio (penúltimo)
+                
+                if second_last_price > 0:
+                    # Calcular variación porcentual entre los dos últimos valores
+                    variation = ((last_price - second_last_price) / second_last_price) * 100
+                    return round(variation, 4)
+            
+            return 0.0
                 
         except Exception as e:
             logger.error(f"❌ Error calculando variación para {exchange_code} {currency_pair}: {e}")
@@ -365,28 +369,32 @@ class DatabaseService:
     @staticmethod
     async def _calculate_variation_advanced(session, exchange_code: str, currency_pair: str, current_price: float) -> dict:
         """
-        Calcular variación avanzada comparando con el último valor registrado en rate_history
+        Calcular variación avanzada comparando con el penúltimo valor registrado en rate_history
         """
         try:
             from sqlalchemy import select, func
             from app.models.rate_models import RateHistory
             from datetime import datetime, timedelta
             
-            # Obtener el último precio registrado en rate_history para este exchange y currency_pair
+            # Obtener los dos últimos precios registrados en rate_history para este exchange y currency_pair
             # Ordenar por timestamp descendente para obtener el más reciente
             stmt_last = select(RateHistory.avg_price).where(
                 RateHistory.exchange_code == exchange_code,
                 RateHistory.currency_pair == currency_pair
-            ).order_by(RateHistory.timestamp.desc()).limit(1)
+            ).order_by(RateHistory.timestamp.desc()).limit(2)
             
             result_last = await session.execute(stmt_last)
-            last_price = result_last.scalar()
+            price_rows = result_last.fetchall()
             
-            # Calcular variación principal (comparando con el último valor registrado)
+            # Calcular variación principal (comparando entre los dos últimos valores registrados)
             variation_main = 0.0
-            if last_price and current_price and last_price > 0:
-                variation_main = ((current_price - last_price) / last_price) * 100
-                variation_main = round(variation_main, 4)
+            if len(price_rows) >= 2:
+                last_price = float(price_rows[0][0])  # Primer precio (más reciente)
+                second_last_price = float(price_rows[1][0])  # Segundo precio (penúltimo)
+                
+                if second_last_price > 0:
+                    variation_main = ((last_price - second_last_price) / second_last_price) * 100
+                    variation_main = round(variation_main, 4)
             
             # Para mantener compatibilidad, también calculamos variaciones por tiempo
             # pero solo si hay datos suficientes
